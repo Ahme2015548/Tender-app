@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm:*)",
+      "Bash(npm run dev:*)",
+      "Bash(git log:*)",
+      "WebFetch(domain:localhost)",
+      "Bash(cp:*)",
+      "Bash(npm install:*)",
+      "Bash(node:*)",
+      "Bash(find:*)",
+      "Bash(firebase --version)",
+      "Bash(firebase login:*)",
+      "Bash(npm start)",
+      "Bash(npm run:*)",
+      "Bash(curl:*)",
+      "Bash(grep:*)",
+      "Bash(npm cache clean:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(where makensis)",
+      "Bash(tar:*)",
+      "Bash(\".\\tender.exe\" --version)",
+      "Bash(dir)",
+      "Bash(powershell:*)",
+      "Bash(7z:*)",
+      "Bash(mkdir:*)",
+      "Bash(electron-packager:*)",
+      "Bash(npx electron-packager:*)",
+      "Bash(echo:*)",
+      "Bash(cat:*)",
+      "Bash(fc:*)",
+      "Bash(npx vite:*)",
+      "Bash(firebase deploy:*)",
+      "Bash(firebase use:*)",
+      "Bash(rg:*)",
+      "Bash(firebase projects:list:*)",
+      "Bash(mv:*)"
+    ],
+    "deny": [],
+    "defaultMode": "acceptEdits",
+    "additionalDirectories": [
+      "C:\\c\\Users\\hydra\\tender",
+      "C:\\c\\Users\\hydra"
+    ]
+  }
+}

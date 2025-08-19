@@ -1,0 +1,21 @@
+/* Sidebar active item background */
+.sidebar-menu li.active,
+.sidebar-menu li.active > a {
+  background-color: #007bff !important;
+  color: #fff !important;
+}
+
+/* Keep icon color blue */
+.sidebar-menu li.active i {
+  color: #007bff !important;
+}
+
+/* Text color in active menu */
+.sidebar-menu li.active .menu-text {
+  color: #fff !important;
+}
+
+/* Submenu visibility */
+.treeview.open .treeview-menu {
+  display: block;
+}
