@@ -37,7 +37,7 @@ const AppRoutes = () => {
   return (
     <SettingsProvider>
       <ActivityTimelineProvider>
-        <Router basename="/Tender-app">
+        <Router basename="/">
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/tender" element={<Home />} />
