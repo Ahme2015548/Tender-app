@@ -1,47 +1,68 @@
 #!/usr/bin/env node
 
-// Simple build script wrapper for Vercel
-const { execSync } = require('child_process');
-const fs = require('fs');
+// Vite programmatic API build script for Vercel
 const path = require('path');
+const fs = require('fs');
 
-try {
-  console.log('Running Vite build...');
-  
-  // Try multiple approaches to run Vite
-  const attempts = [
-    // Method 1: Use npx with full path
-    'npx vite build',
-    // Method 2: Direct node execution of vite CLI
-    'node ./node_modules/vite/bin/vite.js build',
-    // Method 3: Use npm run build:vite as fallback
-    'npm run build:vite'
-  ];
-  
-  let success = false;
-  
-  for (const command of attempts) {
-    try {
-      console.log(`Attempting: ${command}`);
-      execSync(command, {
-        cwd: __dirname,
-        stdio: 'inherit',
-        env: { ...process.env, PATH: process.env.PATH + ':' + path.join(__dirname, 'node_modules', '.bin') }
-      });
-      success = true;
-      break;
-    } catch (err) {
-      console.log(`Failed: ${command} - ${err.message}`);
-      continue;
+async function build() {
+  try {
+    console.log('Running Vite build via programmatic API...');
+    
+    // Import Vite programmatically to bypass binary permission issues
+    const { build } = require('vite');
+    
+    // Run Vite build programmatically
+    await build({
+      configFile: path.resolve(__dirname, 'vite.config.js'),
+      root: __dirname,
+      base: '/',
+      build: {
+        outDir: 'dist',
+        emptyOutDir: true
+      }
+    });
+    
+    console.log('Build completed successfully via Vite API!');
+    
+  } catch (error) {
+    console.error('Programmatic build failed, trying fallback methods...');
+    
+    // Fallback to shell execution as last resort
+    const { execSync } = require('child_process');
+    
+    const fallbackCommands = [
+      'npx --yes vite@latest build',
+      'npm run build:vite'
+    ];
+    
+    let success = false;
+    
+    for (const command of fallbackCommands) {
+      try {
+        console.log(`Fallback attempting: ${command}`);
+        execSync(command, {
+          cwd: __dirname,
+          stdio: 'inherit',
+          env: { ...process.env }
+        });
+        success = true;
+        break;
+      } catch (err) {
+        console.log(`Fallback failed: ${command} - ${err.message}`);
+        continue;
+      }
     }
+    
+    if (!success) {
+      console.error('All build methods failed:', error.message);
+      process.exit(1);
+    }
+    
+    console.log('Build completed via fallback method!');
   }
-  
-  if (!success) {
-    throw new Error('All build attempts failed');
-  }
-  
-  console.log('Build completed successfully!');
-} catch (error) {
-  console.error('Build failed:', error.message);
-  process.exit(1);
 }
+
+build().catch((error) => {
+  console.error('Build process failed:', error);
+  process.exit(1);
+});
