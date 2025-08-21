@@ -26,7 +26,7 @@ window.debugFirebaseConfig = () => {
   const missing = Object.entries(config).filter(([key, value]) => !value);
   if (missing.length > 0) {
     console.error('❌ Missing Firebase configuration:', missing.map(([key]) => key));
-    console.log('💡 Make sure .env file exists in frontend/ directory');
+    console.log('💡 Make sure .env file exists in project root directory');
     console.log('💡 Make sure Vite dev server is running (npm run dev)');
     console.log('💡 Environment variables must start with VITE_ prefix');
   } else {

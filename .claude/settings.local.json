@@ -52,7 +52,12 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push:*)",
-      "Bash(npx vercel:*)"
+      "Bash(npx vercel:*)",
+      "Bash(pkill:*)",
+      "Bash(if [ -d \"C:/Users/hydra/tender/frontend\" ])",
+      "Bash(else echo \"Frontend folder already removed\")",
+      "Bash(lsof:*)",
+      "Bash(fuser:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",
