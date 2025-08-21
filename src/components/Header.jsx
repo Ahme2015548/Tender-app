@@ -55,13 +55,13 @@ export default function Header({ onToggle }) {
             
             <div className="app-brand py-2" style={{ marginTop: '-8px', marginRight: '-20px' }}>
               <a href="/" className="d-sm-block d-none">
-                <img src="/Tender-app/images/logo.svg" className="logo" alt="Modern Bin" style={{
+                <img src="/images/logo.svg" className="logo" alt="Modern Bin" style={{
                   height: '40px',
                   width: 'auto'
                 }} />
               </a>
               <a href="/" className="d-sm-none d-block">
-                <img src="/Tender-app/images/logo-sm.svg" className="logo" alt="Modern Bin" style={{
+                <img src="/images/logo-sm.svg" className="logo" alt="Modern Bin" style={{
                   height: '40px',
                   width: 'auto'
                 }} />
@@ -240,7 +240,7 @@ export default function Header({ onToggle }) {
           <div className="d-flex align-items-center">
             <div className="dropdown ms-2">
             <a className="dropdown-toggle d-flex py-2 align-items-center text-decoration-none" href="#!" role="button" data-bs-toggle="dropdown">
-              <img src="/Tender-app/images/user.png" className="rounded-2 img-3x" alt="User" />
+              <img src="/images/user.png" className="rounded-2 img-3x" alt="User" />
               <span className="ms-2 text-truncate d-lg-block d-none">
                 {employeeData?.fullName || 'المستخدم'}
               </span>
