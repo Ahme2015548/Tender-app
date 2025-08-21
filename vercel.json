@@ -1,9 +1,7 @@
 {
   "buildCommand": "npm run build",
+  "installCommand": "npm install",
   "outputDirectory": "dist",
-  "env": {
-    "VERCEL_NODE_VERSION": "20.19.0"
-  },
   "rewrites": [
     {
       "source": "/(.*)",
