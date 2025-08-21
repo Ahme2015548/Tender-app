@@ -1,8 +1,19 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
+  "buildCommand": "rm -rf dist && npm run build",
   "outputDirectory": "dist",
   "installCommand": "npm install",
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        }
+      ]
+    }
+  ],
   "routes": [
     {
       "handle": "filesystem"

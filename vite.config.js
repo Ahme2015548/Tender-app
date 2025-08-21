@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Force cache invalidation
+const timestamp = Date.now()
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
@@ -17,18 +20,21 @@ export default defineConfig({
     }
   },
   build: {
-    // Ensure assets are copied correctly during build
+    // Force new hash for cache invalidation
     assetsDir: 'assets',
     copyPublicDir: true,
     rollupOptions: {
       output: {
-        // Keep asset names predictable
+        // Force new hash on every build to break cache
+        entryFileNames: `assets/[name]-${timestamp}-[hash].js`,
+        chunkFileNames: `assets/[name]-${timestamp}-[hash].js`,
         assetFileNames: (assetInfo) => {
           // Keep images in their original structure
           if (assetInfo.name && assetInfo.name.match(/\.(png|jpe?g|svg|gif|webp)$/i)) {
             return 'images/[name][extname]';
           }
-          return 'assets/[name]-[hash][extname]';
+          // Force new hash with timestamp for CSS/JS assets
+          return `assets/[name]-${timestamp}-[hash][extname]`;
         }
       }
     }
