@@ -57,7 +57,10 @@
       "Bash(if [ -d \"C:/Users/hydra/tender/frontend\" ])",
       "Bash(else echo \"Frontend folder already removed\")",
       "Bash(lsof:*)",
-      "Bash(fuser:*)"
+      "Bash(fuser:*)",
+      "Bash(npm --version)",
+      "Bash(npm outdated)",
+      "Bash(npm update)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",
