@@ -8,12 +8,8 @@
       "handle": "filesystem"
     },
     {
-      "src": "/Tender-app/(.*)",
-      "dest": "/Tender-app/index.html"
-    },
-    {
       "src": "/(.*)",
-      "dest": "/Tender-app/index.html"
+      "dest": "/index.html"
     }
   ]
 }
