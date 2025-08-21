@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node build.cjs",
+    "build:vite": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
