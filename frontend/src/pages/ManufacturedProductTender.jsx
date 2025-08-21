@@ -6,7 +6,7 @@ import SidebarButtons from '../components/SidebarButtons';
 import SimpleActivityTimeline from '../components/SimpleActivityTimeline';
 import ManualActivityCreator from '../components/ManualActivityCreator';
 import { ManufacturedProductService } from '../services/ManufacturedProductService';
-import { TenderItemsService } from '../services/TenderItemsService';
+import { TenderItemsServiceNew } from '../services/TenderItemsServiceNew';
 import { useActivity } from '../components/ActivityManager';
 import { ActivityProvider, AutoActivityTracker } from '../components/ActivityManager';
 import ModernSpinner from '../components/ModernSpinner';
@@ -14,6 +14,7 @@ import CustomAlert from '../components/CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
 import { useDateFormat } from '../hooks/useDateFormat';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 
 function ManufacturedProductTenderContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -26,7 +27,6 @@ function ManufacturedProductTenderContent() {
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [showQuantityModal, setShowQuantityModal] = useState(false);
   const [modalItems, setModalItems] = useState([]);
-  const [duplicateWarning, setDuplicateWarning] = useState('');
 
   const navigate = useNavigate();
   const { tenderId } = useParams();
@@ -38,10 +38,94 @@ function ManufacturedProductTenderContent() {
     setSidebarCollapsed(!sidebarCollapsed);
   };
 
-  // 🧠 SENIOR REACT: Simple direct duplicate prevention (EXACT like ItemList example)
-  const clearWarningAfterDelay = () => {
-    setTimeout(() => setDuplicateWarning(''), 3000);
+  // Clean duplicate prevention system (EXACT METHOD from AddTender)
+  const checkForDuplicates = (existingItems, newItems) => {
+    console.log('🧠 SENIOR REACT: Starting advanced duplicate prevention analysis...');
+    
+    const duplicates = [];
+    const uniqueItems = [];
+    
+    // Create comprehensive comparison maps for existing items
+    const existingIdsMap = new Map();
+    const existingNamesMap = new Map();
+    
+    existingItems.forEach((item, index) => {
+      // ID-based mapping (multiple ID strategies)
+      const itemId = item.materialInternalId || item.internalId || item.id;
+      if (itemId) {
+        existingIdsMap.set(itemId, { item, index });
+      }
+      
+      // Name-based mapping (case-insensitive) - Include title for manufactured products
+      const itemName = (item.materialName || item.name || item.title || '').trim();
+      if (itemName) {
+        const normalizedName = itemName.toLowerCase();
+        existingNamesMap.set(normalizedName, { item, index });
+      }
+    });
+
+    console.log('🧠 DUPLICATE PREVENTION MAPS:', {
+      existingIdsCount: existingIdsMap.size,
+      existingNamesCount: existingNamesMap.size
+    });
+
+    // Check each new item for duplicates
+    newItems.forEach(newItem => {
+      const newItemId = newItem.materialInternalId || newItem.internalId || newItem.id;
+      const newItemName = (newItem.materialName || newItem.name || newItem.title || '').trim();
+      const normalizedNewName = newItemName.toLowerCase();
+      
+      let isDuplicate = false;
+      let duplicateType = '';
+      let duplicateMatch = null;
+
+      // 1. Check for ID-based duplicates (exact match)
+      if (newItemId && existingIdsMap.has(newItemId)) {
+        isDuplicate = true;
+        duplicateType = 'ID';
+        duplicateMatch = existingIdsMap.get(newItemId).item;
+        console.log(`🚨 ID DUPLICATE: ${newItemName} matches existing ID: ${newItemId}`);
+      }
+      
+      // 2. Check for name-based duplicates (case-insensitive)
+      if (!isDuplicate && newItemName && existingNamesMap.has(normalizedNewName)) {
+        isDuplicate = true;
+        duplicateType = 'NAME';
+        duplicateMatch = existingNamesMap.get(normalizedNewName).item;
+        console.log(`🚨 NAME DUPLICATE: "${newItemName}" matches existing name (case-insensitive)`);
+      }
+
+      if (isDuplicate) {
+        duplicates.push({
+          newItem,
+          existingItem: duplicateMatch,
+          type: duplicateType,
+          displayName: newItemName || 'بند غير محدد'
+        });
+      } else {
+        uniqueItems.push(newItem);
+        console.log(`✅ UNIQUE ITEM: ${newItemName} - Adding to list`);
+        
+        // Update maps with new item for subsequent checks
+        if (newItemId) {
+          existingIdsMap.set(newItemId, { item: newItem, index: -1 });
+        }
+        if (newItemName) {
+          existingNamesMap.set(normalizedNewName, { item: newItem, index: -1 });
+        }
+      }
+    });
+
+    console.log('🧠 DUPLICATE ANALYSIS COMPLETE:', {
+      totalNewItems: newItems.length,
+      uniqueItemsFound: uniqueItems.length,
+      duplicatesFound: duplicates.length,
+      duplicateDetails: duplicates.map(d => ({ name: d.displayName, type: d.type }))
+    });
+
+    return { duplicates, uniqueItems };
   };
+
 
 
   useEffect(() => {
@@ -49,9 +133,9 @@ function ManufacturedProductTenderContent() {
     
     // Listen for storage events to sync data changes from other pages
     const handleStorageChange = (e) => {
-      if (e.key === 'manufacturedProducts_updated') {
+      // Firestore real-time listeners handle data sync automatically
+      if (e.type === 'manufacturedProductsUpdated') {
         loadManufacturedProducts();
-        localStorage.removeItem('manufacturedProducts_updated');
       }
     };
     
@@ -108,7 +192,7 @@ function ManufacturedProductTenderContent() {
     }
   };
 
-  const handleAddSelectedProducts = () => {
+  const handleAddSelectedProducts = async () => {
     if (selectedProducts.length === 0) {
       showError('يرجى اختيار منتج مصنع واحد على الأقل', 'لا توجد منتجات مختارة');
       return;
@@ -136,15 +220,15 @@ function ManufacturedProductTenderContent() {
     });
 
     setModalItems(itemsWithQuantity);
-    setDuplicateWarning(''); // Clear any previous warnings
     setShowQuantityModal(true);
   };
 
   const handleQuantityChange = (itemId, newQuantity) => {
-    const quantity = Math.max(1, parseInt(newQuantity) || 1);
+    // Allow any positive number for manual input, no restrictions
+    const quantity = Math.max(0, parseFloat(newQuantity) || 0);
     setModalItems(prev => prev.map(item => 
       item.id === itemId 
-        ? { ...item, quantity, totalPrice: item.unitPrice * quantity }
+        ? { ...item, quantity: Number(quantity.toFixed(1)), totalPrice: item.unitPrice * Number(quantity.toFixed(1)) }
         : item
     ));
   };
@@ -156,44 +240,49 @@ function ManufacturedProductTenderContent() {
         return;
       }
 
-      // Get existing items from sessionStorage
-      const existingItemsStorage = sessionStorage.getItem('pendingTenderItems');
-      const existingItems = existingItemsStorage ? JSON.parse(existingItemsStorage) : [];
+      // Get existing items from Firestore
+      const existingItems = await FirestorePendingDataService.getPendingTenderItems() || [];
       
-      const duplicateItems = [];
-      const uniqueItems = [];
+      // Prepare items for duplicate checking (convert manufactured products to tender items format)
+      const itemsToCheck = modalItems.map(item => ({
+        ...item,
+        materialName: item.title,
+        materialInternalId: item.internalId
+      }));
       
-      // Simple duplicate check like ItemList example
-      for (const item of modalItems) {
-        const itemName = item.title.trim();
-        
-        // Check for duplicate by case-insensitive name comparison
-        const isDuplicate = existingItems.some(existingItem => {
-          const existingName = (existingItem.materialName || '').trim();
-          return existingName.toLowerCase() === itemName.toLowerCase();
+      // Use clean AddTender duplicate prevention method
+      const result = checkForDuplicates(existingItems, itemsToCheck);
+      const { duplicates, uniqueItems } = result;
+      
+      // Handle duplicates with clean error system (EXACT METHOD from AddTender)
+      if (duplicates.length > 0) {
+        const duplicateMessages = duplicates.map(dup => {
+          const matchType = dup.type === 'ID' ? 'معرف مطابق' : 'اسم مطابق';
+          return `⚠️ "${dup.displayName}" (${matchType})`;
         });
         
-        if (isDuplicate) {
-          duplicateItems.push(itemName);
-        } else {
-          uniqueItems.push(item);
-        }
-      }
-      
-      // Show warning if duplicates found (exactly like ItemList example)
-      if (duplicateItems.length > 0) {
-        const duplicateNames = duplicateItems.join('، ');
-        setDuplicateWarning(`⚠️ البنود التالية موجودة مسبقاً: ${duplicateNames}`);
-        clearWarningAfterDelay();
+        // Show error alert for duplicate items (CLEAN AddTender method)
+        showError(
+          `تم العثور على ${duplicates.length} بند مكرر. لن يتم إضافة البنود المكررة.\n\n${duplicateMessages.join('\n')}`,
+          'بنود مكررة'
+        );
+        
+        console.log('🚨 DUPLICATES BLOCKED:', {
+          count: duplicates.length,
+          names: duplicates.map(d => d.displayName)
+        });
+        
         return; // Stop execution if duplicates found
       }
       
-      // Create tender items for unique items only
+      // Create tender items directly with all required fields (EXACT CLONE from ForeignProductTender)
       const newTenderItems = [];
       
       for (const item of uniqueItems) {
         try {
-          const tenderItem = await TenderItemsService.createTenderItemSimple({
+          // Create tender item directly with all required fields
+          const tenderItem = {
+            internalId: `ti_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             materialInternalId: item.internalId,
             materialType: 'manufacturedProduct',
             materialName: item.title,
@@ -201,9 +290,12 @@ function ManufacturedProductTenderContent() {
             materialUnit: 'قطعة',
             quantity: item.quantity || 1,
             unitPrice: item.unitPrice || 0,
+            totalPrice: (item.quantity || 1) * (item.unitPrice || 0),
+            supplierInfo: 'منتج مصنع',
             tenderId: tenderId === 'new' ? 'new' : tenderId,
-            supplierInfo: 'منتج مصنع'
-          });
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
           
           newTenderItems.push(tenderItem);
         } catch (itemError) {
@@ -215,7 +307,7 @@ function ManufacturedProductTenderContent() {
       
       // Merge with existing items (no duplicates since we checked above)
       const allItems = [...existingItems, ...newTenderItems];
-      sessionStorage.setItem('pendingTenderItems', JSON.stringify(allItems));
+      await FirestorePendingDataService.setPendingTenderItems(allItems);
 
       // Log activity
       try {
@@ -230,10 +322,18 @@ function ManufacturedProductTenderContent() {
       // Show success message
       showSuccess(`تم إضافة ${newTenderItems.length} منتج مصنع للمناقصة`, 'تمت الإضافة');
       
+      // Dispatch custom event to notify AddTender page (EXACT CLONE from ForeignProductTender)
+      window.dispatchEvent(new CustomEvent('tenderItemsAdded', {
+        detail: {
+          count: newTenderItems.length,
+          type: 'manufacturedProduct',
+          items: newTenderItems
+        }
+      }));
+      
       // Close modal and navigate back
       setShowQuantityModal(false);
       setModalItems([]);
-      setDuplicateWarning('');
       
       setTimeout(() => {
         if (tenderId === 'new') {
@@ -252,7 +352,6 @@ function ManufacturedProductTenderContent() {
   const handleCloseQuantityModal = () => {
     setShowQuantityModal(false);
     setModalItems([]);
-    setDuplicateWarning(''); // Clear warning on modal close
   };
 
   const getTotalModalPrice = () => {
@@ -290,7 +389,7 @@ function ManufacturedProductTenderContent() {
   return (
     <>
       <div className={`page-wrapper ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-        <Header onToggle={handleToggle} />
+          <Header onToggle={handleToggle} />
         
         <div className="main-container" style={{
           paddingRight: sidebarCollapsed ? '72px' : '250px',
@@ -534,12 +633,6 @@ function ManufacturedProductTenderContent() {
               </div>
               
               <div className="modal-body p-0" style={{ maxHeight: '50vh', overflowY: 'auto' }}>
-                {/* Simple duplicate warning (exactly like ItemList example) */}
-                {duplicateWarning && (
-                  <div style={{ color: 'red', margin: '10px 20px', padding: '10px', backgroundColor: '#ffe6e6', borderRadius: '5px', border: '1px solid #ff9999' }}>
-                    {duplicateWarning}
-                  </div>
-                )}
                 
                 <div className="table-responsive">
                   <table className="table table-hover mb-0">
@@ -590,8 +683,8 @@ function ManufacturedProductTenderContent() {
                               <button 
                                 type="button" 
                                 className="btn btn-outline-secondary btn-sm"
-                                onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
-                                disabled={item.quantity <= 1}
+                                onClick={() => handleQuantityChange(item.id, Math.max(0, Number((item.quantity - 0.1).toFixed(1))))}
+                                disabled={item.quantity <= 0}
                                 style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                               >
                                 <i className="bi bi-dash"></i>
@@ -601,13 +694,19 @@ function ManufacturedProductTenderContent() {
                                 className="form-control text-center mx-2"
                                 style={{ width: '80px', height: '32px', borderRadius: '6px' }}
                                 value={item.quantity}
-                                min="1"
+                                min="0"
+                                step="any"
                                 onChange={(e) => handleQuantityChange(item.id, e.target.value)}
+                                onBlur={(e) => {
+                                  // Format to 1 decimal place when user finishes editing
+                                  const formattedValue = Number(e.target.value || 0).toFixed(1);
+                                  handleQuantityChange(item.id, formattedValue);
+                                }}
                               />
                               <button 
                                 type="button" 
                                 className="btn btn-outline-secondary btn-sm"
-                                onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                                onClick={() => handleQuantityChange(item.id, Number((item.quantity + 0.1).toFixed(1)))}
                                 style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                               >
                                 <i className="bi bi-plus"></i>
@@ -624,7 +723,7 @@ function ManufacturedProductTenderContent() {
                               {Math.round(item.totalPrice)} ريال
                             </div>
                             <small className="text-success">
-                              ({item.quantity} × {Math.round(item.unitPrice)})
+                              ({item.quantity.toFixed(1)} × {Math.round(item.unitPrice)})
                             </small>
                           </td>
                         </tr>
@@ -642,7 +741,7 @@ function ManufacturedProductTenderContent() {
                       {getTotalModalPrice()} ريال
                     </span>
                     <span className="badge bg-info ms-2">
-                      {modalItems.reduce((total, item) => total + item.quantity, 0)} قطعة
+                      {modalItems.reduce((total, item) => total + item.quantity, 0).toFixed(1)} قطعة
                     </span>
                   </div>
                   <div className="d-flex gap-2">

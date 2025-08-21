@@ -44,7 +44,7 @@ const CompanyForm = ({ company, onSave, onCancel }) => {
   }, [company]);
 
 
-  // Load documents from localStorage on component mount and when editing
+  // Load documents from Firestore on component mount and when editing
   useEffect(() => {
     const loadData = () => {
       if (isEditing && company?.id) {

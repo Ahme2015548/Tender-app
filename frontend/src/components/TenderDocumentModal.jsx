@@ -17,7 +17,8 @@ const TenderDocumentModal = ({
   setUploadingDocument,
   handleDocumentUpload,
   handleDeleteClick,
-  deleting
+  deleting,
+  title = "وثائق المناقصة" // Default title for tender documents
 }) => {
   const { alertConfig, closeAlert, showSuccess, showError } = useCustomAlert();
   const { formatDate } = useDateFormat();
@@ -46,7 +47,7 @@ const TenderDocumentModal = ({
                  }}>
               <h5 className="modal-title fw-bold">
                 <i className="bi bi-file-earmark-text me-2"></i>
-                وثائق المناقصة
+                {title}
               </h5>
               <button 
                 type="button" 

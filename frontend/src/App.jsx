@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ActivityTimelineProvider } from './contexts/ActivityTimelineContext';
 import { SettingsProvider } from './contexts/SettingsContext';
 import AuthAppWrapper from './components/AuthAppWrapper';
+// import './utils/ImageManager'; // DISABLED - Images are in public folder
 import Home from './pages/Home';
 import TenderList from './pages/TenderList';
 import AddTender from './pages/AddTender';
@@ -32,11 +33,11 @@ import './assets/css/rtl.css';
 import './assets/css/sidebar-toggle.css';
 
 // Protected App Routes - Only shown when user is authenticated
-const AppRoutes = () => {
+const AppRoutes = () => {  
   return (
     <SettingsProvider>
       <ActivityTimelineProvider>
-        <Router>
+        <Router basename="/Tender-app">
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/tender" element={<Home />} />

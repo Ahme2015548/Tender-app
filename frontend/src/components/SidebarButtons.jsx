@@ -1,19 +1,37 @@
 import React, { useState, useEffect } from 'react';
+import { userSettingsService } from '../services/UserSettingsService';
 
 export default function SidebarButtons() {
-  // Sidebar buttons state with localStorage persistence
-  const [activeButtons, setActiveButtons] = useState(() => {
-    const saved = localStorage.getItem('sidebar-active-button');
-    return saved ? [saved] : ['المبيعات']; // Default to المبيعات if no saved state
-  });
+  // Sidebar buttons state with Firestore persistence
+  const [activeButtons, setActiveButtons] = useState(['المبيعات']); // Default to المبيعات
+  const [loading, setLoading] = useState(true);
   const sidebarButtonTypes = ['المشتريات', 'المبيعات', 'الحسابات', 'الموظفون', 'التصميم'];
 
-  // Save to localStorage whenever active button changes
+  // Load from Firestore on mount
   useEffect(() => {
-    if (activeButtons.length > 0) {
-      localStorage.setItem('sidebar-active-button', activeButtons[0]);
+    const loadActiveButton = async () => {
+      try {
+        await userSettingsService.initialize();
+        const saved = userSettingsService.getSetting('sidebar-active-button');
+        if (saved) {
+          setActiveButtons([saved]);
+        }
+      } catch (error) {
+        console.error('Error loading active button:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadActiveButton();
+  }, []);
+
+  // Save to Firestore whenever active button changes
+  useEffect(() => {
+    if (!loading && activeButtons.length > 0) {
+      userSettingsService.setSetting('sidebar-active-button', activeButtons[0]);
     }
-  }, [activeButtons]);
+  }, [activeButtons, loading]);
 
   const toggleButtonActive = (buttonText) => {
     if (sidebarButtonTypes.includes(buttonText)) {

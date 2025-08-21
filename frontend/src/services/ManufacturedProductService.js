@@ -16,7 +16,7 @@ import { generateId } from '../utils/idGenerator.js';
 
 // Helper function to trigger data sync across pages
 const triggerDataSync = () => {
-  localStorage.setItem('manufacturedProducts_updated', Date.now().toString());
+  // Firestore real-time listeners handle data sync automatically
   // Trigger custom event for same-page components
   window.dispatchEvent(new CustomEvent('manufacturedProductsUpdated'));
 };

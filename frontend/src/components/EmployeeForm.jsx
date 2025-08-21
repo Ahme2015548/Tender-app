@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { EmployeeService } from '../services/employeeService';
 import { UniqueValidationService } from '../services/uniqueValidationService';
-import { EmployeeDocumentService } from '../services/employeeDocumentService';
-import { SimpleTrashService } from '../services/simpleTrashService';
 import { useActivity } from './ActivityManager';
 import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import ModernSpinner from './ModernSpinner';
 import { formatDateForInput } from '../utils/dateUtils';
-import EmployeeDocumentModal from './EmployeeDocumentModal';
+import TenderDocumentModal from './TenderDocumentModal';
 import fileStorageService from '../services/fileStorageService';
+import { SimpleTrashService } from '../services/simpleTrashService';
+import { EmployeeDocumentService } from '../services/employeeDocumentService';
 
 const EmployeeForm = ({ employee, onSave, onCancel }) => {
   const [formData, setFormData] = useState({
@@ -27,16 +27,7 @@ const EmployeeForm = ({ employee, onSave, onCancel }) => {
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
-  const [documents, setDocuments] = useState(() => {
-    // Load documents from localStorage on initialization
-    try {
-      const savedDocs = localStorage.getItem(`employeeDocuments_${employee?.id || 'new'}`);
-      return savedDocs ? JSON.parse(savedDocs) : [];
-    } catch (error) {
-      console.error('Error loading saved employee documents:', error);
-      return [];
-    }
-  });
+  const [documents, setDocuments] = useState([]);
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [showFileNameModal, setShowFileNameModal] = useState(false);
   const [pendingFileData, setPendingFileData] = useState(null);
@@ -61,48 +52,34 @@ const EmployeeForm = ({ employee, onSave, onCancel }) => {
         hireDate: employee.hireDate ? formatDateForInput(employee.hireDate) : '',
         notes: employee.notes || ''
       });
-
-      // Load employee documents when editing
-      if (employee.id) {
-        loadEmployeeDocuments(employee.id);
-      }
+      
+      // Load existing documents for this employee
+      loadEmployeeDocuments();
+    } else {
+      // Clear documents for new employee
+      setDocuments([]);
     }
   }, [employee]);
 
-  // Load employee documents
-  const loadEmployeeDocuments = async (employeeId) => {
+  // Load employee documents from Firebase
+  const loadEmployeeDocuments = async () => {
+    if (!employee?.id || employee.id === 'new') {
+      setDocuments([]);
+      return;
+    }
+
     try {
-      console.log('📋 Loading documents for employee:', employeeId);
-      const employeeDocuments = await EmployeeDocumentService.getEmployeeDocuments(employeeId);
+      console.log('📋 Loading documents for employee:', employee.id);
+      const employeeDocuments = await EmployeeDocumentService.getEmployeeDocuments(employee.id);
       setDocuments(employeeDocuments);
-      
-      // Backup to localStorage
-      localStorage.setItem(`employeeDocuments_${employeeId}`, JSON.stringify(employeeDocuments));
       console.log('✅ Loaded employee documents:', employeeDocuments.length);
     } catch (error) {
-      console.error('Error loading employee documents:', error);
-      // Fallback to localStorage
-      try {
-        const savedDocs = localStorage.getItem(`employeeDocuments_${employeeId}`);
-        if (savedDocs) {
-          setDocuments(JSON.parse(savedDocs));
-        }
-      } catch (fallbackError) {
-        console.error('Error loading from localStorage:', fallbackError);
-      }
+      console.error('❌ Error loading employee documents:', error);
+      // Don't show error to user, just use empty array
+      setDocuments([]);
     }
   };
 
-  // Save documents to localStorage whenever they change
-  useEffect(() => {
-    try {
-      const employeeId = employee?.id || 'new';
-      localStorage.setItem(`employeeDocuments_${employeeId}`, JSON.stringify(documents));
-      console.log('Saved employee documents to localStorage:', documents.length, 'documents');
-    } catch (error) {
-      console.error('Error saving employee documents:', error);
-    }
-  }, [documents, employee?.id]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -186,19 +163,50 @@ const EmployeeForm = ({ employee, onSave, onCancel }) => {
           internalId: createResult.internalId 
         };
         
-        // Transfer documents from 'new' to the actual employee ID
-        if (createResult.id && documents.length > 0) {
+        // Transfer documents from 'new' to actual employee ID
+        if (documents.length > 0) {
           try {
-            console.log('🔄 Transferring employee documents from new to:', createResult.id);
-            await EmployeeDocumentService.transferDocuments('new', createResult.id);
+            console.log('📄 Transferring documents to new employee:', createResult.id);
             
-            // Update localStorage with new employee ID
-            localStorage.setItem(`employeeDocuments_${createResult.id}`, JSON.stringify(documents));
-            localStorage.removeItem('employeeDocuments_new');
+            // Update documents with real employee ID and save to Firebase
+            const documentsToSave = documents.map(doc => ({
+              ...doc,
+              employeeId: createResult.id,
+              employeeName: formData.fullName,
+              employeeEmail: formData.email
+            }));
             
-            console.log('✅ Employee documents transferred successfully');
-          } catch (docError) {
-            console.error('⚠️ Error transferring employee documents (non-critical):', docError.message);
+            // Save each document to Firebase
+            for (const document of documentsToSave) {
+              try {
+                // Create a File-like object for the service
+                const fileBlob = new File([''], document.originalFileName, {
+                  type: document.fileType
+                });
+                Object.defineProperty(fileBlob, 'name', { value: document.originalFileName });
+                Object.defineProperty(fileBlob, 'size', { value: document.fileSize });
+                Object.defineProperty(fileBlob, 'type', { value: document.fileType });
+                
+                const savedDoc = await EmployeeDocumentService.uploadDocument(
+                  fileBlob, 
+                  createResult.id, 
+                  document.fileName
+                );
+                
+                // Override with existing file data since we already uploaded
+                savedDoc.fileURL = document.fileURL;
+                savedDoc.storagePath = document.storagePath;
+                
+                console.log('✅ Document transferred to Firebase:', document.fileName);
+              } catch (docError) {
+                console.warn('⚠️ Failed to save document to Firebase:', document.fileName, docError.message);
+              }
+            }
+            
+            console.log('✅ All documents transferred successfully');
+          } catch (transferError) {
+            console.warn('⚠️ Document transfer failed:', transferError.message);
+            // Don't fail the employee creation if document transfer fails
           }
         }
         
@@ -226,7 +234,7 @@ const EmployeeForm = ({ employee, onSave, onCancel }) => {
     }
   };
 
-  // Document upload using proven fileStorageService - with file name prompt
+  // Document upload handling - using same pattern as AddTender.jsx
   const handleDocumentUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -274,7 +282,7 @@ const EmployeeForm = ({ employee, onSave, onCancel }) => {
     }
   };
 
-  // Handle file name confirmation - SAVE TO FIREBASE DATABASE
+  // Handle file name confirmation - SAVE TO FIREBASE DATABASE using EmployeeDocumentService
   const handleFileNameSave = async () => {
     if (!customFileName.trim()) {
       showError('يرجى إدخال اسم الملف', 'اسم الملف مطلوب');
@@ -288,49 +296,62 @@ const EmployeeForm = ({ employee, onSave, onCancel }) => {
 
     try {
       setUploadingDocument(true);
-      console.log('📤 Creating employee document with Firebase database storage:', customFileName);
+      console.log('📤 Saving employee document via EmployeeDocumentService:', customFileName);
       
-      // Create document object with consistent structure
+      // Create a File-like object for the service (it expects the original file)
+      const fileBlob = new File([''], pendingFileData.originalFileName, {
+        type: pendingFileData.fileType
+      });
+      
+      // Override the file properties we need
+      Object.defineProperty(fileBlob, 'name', { value: pendingFileData.originalFileName });
+      Object.defineProperty(fileBlob, 'size', { value: pendingFileData.fileSize });
+      Object.defineProperty(fileBlob, 'type', { value: pendingFileData.fileType });
+      
+      // Since we already uploaded to storage, we'll manually create the document
       const newDocument = {
-        id: Date.now().toString(),
         fileName: customFileName.trim(),
         originalFileName: pendingFileData.originalFileName,
         fileURL: pendingFileData.url,
         storagePath: pendingFileData.path,
         fileSize: pendingFileData.fileSize,
         fileType: pendingFileData.fileType,
-        uploadedAt: new Date().toISOString(),
-        uploadDate: new Date().toISOString(),
         employeeId: employee?.id || 'new',
-        employeeName: formData.fullName || 'موظف جديد'
+        employeeName: formData.fullName || 'موظف جديد',
+        employeeEmail: formData.email || 'غير محدد',
+        uploadedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+        id: Date.now().toString()
       };
       
-      // Add to documents state (for immediate UI update)
-      setDocuments(prev => [...prev, newDocument]);
-      
-      // CRITICAL: Save to Firebase database if employee exists
+      // For existing employees, save to Firebase immediately
       if (employee?.id && employee.id !== 'new') {
         try {
-          console.log('💾 Saving document to Firebase database for existing employee:', employee.id);
-          await EmployeeDocumentService.uploadDocument(
-            new File([pendingFileData.originalFileName], pendingFileData.originalFileName),
-            employee.id,
-            customFileName.trim()
-          );
-          console.log('✅ Employee document saved to Firebase database successfully');
-        } catch (dbError) {
-          console.warn('⚠️ Firebase database save failed, document stored locally only:', dbError.message);
+          // Use the service to save to Firebase (it will handle the upload and metadata)
+          const savedDocument = await EmployeeDocumentService.uploadDocument(fileBlob, employee.id, customFileName.trim());
+          
+          // Override the file URL since we already uploaded it
+          savedDocument.fileURL = pendingFileData.url;
+          savedDocument.storagePath = pendingFileData.path;
+          
+          // Add the saved document to state
+          setDocuments(prev => [...prev, savedDocument]);
+          console.log('✅ Document saved to Firebase successfully');
+        } catch (firebaseError) {
+          console.warn('⚠️ Firebase save failed, storing locally for now:', firebaseError.message);
+          setDocuments(prev => [...prev, newDocument]);
         }
       } else {
-        // For new employees, documents will be saved when the employee is created
-        console.log('📋 Document stored locally for new employee, will be saved to Firebase when employee is created');
+        // For new employees, store locally until employee is saved
+        console.log('📋 New employee - storing document locally until employee is saved');
+        setDocuments(prev => [...prev, newDocument]);
       }
       
       showSuccess(`تم رفع الملف بنجاح: ${customFileName}`, 'تم الرفع');
       
       // Log activity
       const currentUser = getCurrentUser();
-      logActivity('file', `${currentUser.name} رفع وثيقة موظف`, `تم رفع الملف: ${customFileName}`);
+      logActivity('file', `${currentUser.name} رفع وثيقة موظف`, `تم رفع الملف: ${customFileName} للموظف: ${formData.fullName || 'موظف جديد'}`);
       
       // Reset modal state
       setShowFileNameModal(false);
@@ -368,19 +389,34 @@ const EmployeeForm = ({ employee, onSave, onCancel }) => {
     try {
       setDeleting(true);
       
-      // Move to trash instead of permanent deletion
-      await SimpleTrashService.moveToTrash(document, 'employee_documents');
+      // For existing employees with real Firebase documents, use the service
+      if (employee?.id && employee.id !== 'new' && !document.id.toString().startsWith('temp_')) {
+        try {
+          await EmployeeDocumentService.deleteDocument(document.id);
+          console.log('✅ Document deleted from Firebase');
+        } catch (firebaseError) {
+          console.warn('⚠️ Firebase delete failed, removing locally:', firebaseError.message);
+        }
+      } else {
+        // For new employees or local documents, try trash service as fallback
+        try {
+          await SimpleTrashService.moveToTrash(document, 'employee_documents');
+          console.log('✅ Document moved to trash');
+        } catch (trashError) {
+          console.warn('⚠️ Trash service failed, removing locally only:', trashError.message);
+        }
+      }
       
       // Remove from local state (equivalent to "delete from original collection")
       setDocuments(prev => prev.filter(doc => doc.id !== document.id));
       
       // Log activity for document deletion
       const currentUser = getCurrentUser();
-      logActivity('task', `${currentUser.name} حذف وثيقة موظف`, `تم حذف الوثيقة: ${document.fileName}`);
+      logActivity('task', `${currentUser.name} حذف وثيقة موظف`, `تم حذف الوثيقة: ${document.fileName} للموظف: ${formData.fullName || 'موظف'}`);
       
-      showSuccess(`تم نقل الملف للمهملات: ${document.fileName}`, 'تم النقل للمهملات');
+      showSuccess(`تم حذف الملف: ${document.fileName}`, 'تم الحذف');
     } catch (err) {
-      showError(`فشل في نقل الملف للمهملات: ${err.message}`, 'خطأ في النقل');
+      showError(`فشل في حذف الملف: ${err.message}`, 'خطأ في الحذف');
     } finally {
       setDeleting(false);
     }
@@ -399,7 +435,7 @@ const EmployeeForm = ({ employee, onSave, onCancel }) => {
           <div className="d-flex gap-2">
             <button 
               type="button" 
-              className="btn btn-success"
+              className="btn btn-secondary"
               onClick={() => setShowDocumentsModal(true)}
               style={{ 
                 height: '32px', 
@@ -667,22 +703,22 @@ const EmployeeForm = ({ employee, onSave, onCancel }) => {
         showCancel={alertConfig.showCancel}
       />
 
-      {/* Employee Document Modal */}
-      <EmployeeDocumentModal
+      {/* Employee Documents Modal - Using TenderDocumentModal with employee context */}
+      <TenderDocumentModal
         show={showDocumentsModal}
         onClose={() => setShowDocumentsModal(false)}
         documents={documents}
         setDocuments={setDocuments}
-        employeeId={employee?.id || 'new'}
-        employeeData={formData}
+        tenderId={employee?.id || 'new'}
         uploadingDocument={uploadingDocument}
         setUploadingDocument={setUploadingDocument}
         handleDocumentUpload={handleDocumentUpload}
         handleDeleteClick={handleDeleteClick}
         deleting={deleting}
+        title="وثائق الموظف"
       />
 
-      {/* File Name Input Modal */}
+      {/* File Name Input Modal - Exact duplicate from AddTender.jsx */}
       {showFileNameModal && (
         <div className="modal show d-block" 
              style={{ backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 1060 }} 
@@ -724,7 +760,7 @@ const EmployeeForm = ({ employee, onSave, onCancel }) => {
                   </div>
                   
                   <div className="mb-3">
-                    <label className="form-label fw-bold text-success">
+                    <label className="form-label fw-bold text-primary">
                       <i className="bi bi-tag me-1"></i>
                       اسم الملف المخصص *
                     </label>
@@ -806,6 +842,7 @@ const EmployeeForm = ({ employee, onSave, onCancel }) => {
           </div>
         </div>
       )}
+
     </div>
   );
 };

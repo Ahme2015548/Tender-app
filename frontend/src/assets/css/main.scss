@@ -11,6 +11,41 @@ body {
   background-color: #f5f6fa; // optional: match background
 }
 
+// Global Header Spacing - Account for fixed header
+.main-container {
+  padding-top: 70px !important;
+}
+
+// Ensure collapsed state also respects header spacing
+.sidebar-collapsed .main-container {
+  padding-top: 70px !important;
+}
+
+// RTL specific header spacing
+[dir="rtl"] .main-container {
+  padding-top: 70px !important;
+}
+
+[dir="rtl"] .sidebar-collapsed .main-container {
+  padding-top: 70px !important;
+}
+
+.app-container {
+  padding-top: 20px !important;
+  margin-top: 0 !important;
+}
+
+.app-hero-header {
+  margin-top: 0 !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+// Page wrapper should account for fixed header
+.page-wrapper {
+  min-height: 100vh;
+}
+
 // Custom Colors
 $sidebar-bg: #28256d;
 $sidebar-hover-bg: #f5f6fa;
@@ -510,22 +545,22 @@ a {
 
 // Backgrounds
 .bg-1 {
-	background: url("../images/pattern.jpg");
+	background: var(--image-pattern, url("../images/pattern.jpg"));
 	background-position: center center;
 	background-size: cover;
 }
 .bg-2 {
-	background: url("../images/pattern2.jpg");
+	background: var(--image-pattern2, url("../images/pattern2.jpg"));
 	background-position: bottom center;
 	background-size: cover;
 }
 .bg-3 {
-	background: url("../images/pattern3.jpg");
+	background: var(--image-pattern3, url("../images/pattern3.jpg"));
 	background-position: center center;
 	background-size: cover;
 }
 .bg-4 {
-	background: url("../images/pattern4.jpg");
+	background: var(--image-pattern4, url("../images/pattern4.jpg"));
 	background-position: center center;
 	background-size: cover;
 }
@@ -746,8 +781,8 @@ a {
 	}
 }
 
-// Main container
-.main-container {
+// Main container - DISABLED to use inline styles
+/* .main-container {
 	padding: 0 0 0 250px;
 	-webkit-transition: padding-left 0.1s ease;
 	transition: padding-left 0.1s ease;
@@ -758,12 +793,12 @@ a {
 	padding: 0 250px 0 0;
 	-webkit-transition: padding-right 0.3s ease;
 	transition: padding-right 0.3s ease;
-}
+} */
 
-// Sidebar Collapsed State
-[dir="rtl"] .sidebar-collapsed .main-container {
+// Sidebar Collapsed State - DISABLED to use inline styles
+/* [dir="rtl"] .sidebar-collapsed .main-container {
 	padding: 0 72px 0 0;
-}
+} */
 
 // Sidebar
 .shop-profile {
@@ -982,7 +1017,7 @@ a {
 				position: absolute;
 				right: 0;
 				top: 10px;
-				background: url(../images/menu-arrow.svg);
+				background: var(--image-menu-arrow, url(../images/menu-arrow.svg));
 				background-repeat: no-repeat;
 				width: 14px;
 				height: 32px;
@@ -1021,7 +1056,7 @@ a {
 				position: absolute;
 				right: 0;
 				top: 10px;
-				background: url(../images/menu-arrow.svg);
+				background: var(--image-menu-arrow, url(../images/menu-arrow.svg));
 				background-size: 100%;
 				background-repeat: no-repeat;
 				width: 14px;
@@ -1053,6 +1088,7 @@ a {
 				color: $sidebar-color;
 				text-decoration: none;
 				white-space: nowrap;
+				position: relative;
 				
 				// RTL Submenu Links
 				[dir="rtl"] & {
@@ -1081,6 +1117,8 @@ a {
 			}
 			&.active {
 				> a {
+					color: $sidebar-color;
+					background: $sidebar-active-bg;
 					.bi-chevron-right {
 						transform: rotate(-90deg);
 					}
@@ -1293,7 +1331,7 @@ a {
 .activity-block {
 	&:before {
 		content: "";
-		background: url(../images/curve-line.svg) repeat-y;
+		background: var(--image-curve-line, url(../images/curve-line.svg)) repeat-y;
 		position: absolute;
 		left: 40px;
 		top: 0;
@@ -1442,7 +1480,7 @@ a {
 
 // Error screen
 .error-screen {
-	background: url(../images/dots.svg) no-repeat;
+	background: var(--image-dots, url(../images/dots.svg)) no-repeat;
 	background-position: center center;
 	background-size: cover;
 	h1.error-title {

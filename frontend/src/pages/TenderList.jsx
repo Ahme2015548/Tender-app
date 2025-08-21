@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import SidebarButtons from '../components/SidebarButtons';
@@ -7,14 +8,34 @@ import ManualActivityCreator from '../components/ManualActivityCreator';
 import TendersList from '../components/TendersList';
 import { ActivityProvider, AutoActivityTracker } from '../components/ActivityManager';
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 
 function TenderListContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { isTimelineVisible } = useActivityTimeline();
+  const navigate = useNavigate();
 
   const handleToggle = () => {
     setSidebarCollapsed(!sidebarCollapsed);
+  };
+
+  const handleAddTender = async () => {
+    try {
+      // Clear all pending data to start completely fresh
+      await FirestorePendingDataService.clearPendingData('tenderFormData_new');
+      await FirestorePendingDataService.clearPendingData('tenderDocuments_new'); 
+      await FirestorePendingDataService.clearPendingTenderItems();
+      
+      console.log('✅ All pending data cleared - navigating to fresh Add Tender form');
+      
+      // Navigate to add tender page
+      navigate('/tenders/add');
+    } catch (error) {
+      console.error('❌ Error clearing pending data:', error);
+      // Navigate anyway even if clearing fails
+      navigate('/tenders/add');
+    }
   };
 
   return (
@@ -76,7 +97,7 @@ function TenderListContent() {
                           </h5>
                         </div>
                         <button 
-                          onClick={() => window.location.href = '/tenders/add'}
+                          onClick={handleAddTender}
                           className="btn btn-primary"
                           style={{ 
                             height: '32px', 

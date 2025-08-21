@@ -168,7 +168,7 @@ export class TenderItemService {
   static async getTenderItemById(tenderItemId) {
     try {
       // This would typically come from your storage system
-      // For now, we'll implement localStorage/sessionStorage lookup
+      // For now, we'll implement SessionDataService lookup
       const tenderItems = this.getAllTenderItemsFromStorage();
       return tenderItems.find(item => item.internalId === tenderItemId) || null;
       
@@ -420,22 +420,21 @@ export class TenderItemService {
   }
 
   /**
-   * Helper method to get tender items from storage (localStorage/sessionStorage)
+   * Helper method to get tender items from storage (sessionDataService)
    */
-  static getAllTenderItemsFromStorage() {
+  static async getAllTenderItemsFromStorage() {
     try {
-      // Check sessionStorage first (for pending items)
-      const pendingItems = sessionStorage.getItem('pendingTenderItems');
-      if (pendingItems) {
-        return JSON.parse(pendingItems);
+      // Check sessionDataService for pending items
+      const pendingItems = await sessionDataService.getPendingTenderItems();
+      if (pendingItems && pendingItems.length > 0) {
+        return pendingItems;
       }
 
-      // Check localStorage for specific tender
-      // This would need the tender ID context
+      // Return empty array if no items found
       return [];
       
     } catch (error) {
-      console.error('Error getting tender items from storage:', error);
+      console.error('Error getting tender items from Firestore:', error);
       return [];
     }
   }

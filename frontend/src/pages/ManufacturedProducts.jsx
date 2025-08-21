@@ -24,7 +24,9 @@ import CustomAlert from '../components/CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import ItemSelectionModal from '../components/ItemSelectionModal';
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
-import { TenderItemsService } from '../services/TenderItemsService';
+import { TenderItemsServiceNew } from '../services/TenderItemsServiceNew';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
+import { FirestoreDocumentService } from '../services/FirestoreDocumentService';
 import { RawMaterialService } from '../services/rawMaterialService';
 import { ForeignProductService } from '../services/foreignProductService';
 import { LocalProductService } from '../services/localProductService';
@@ -49,23 +51,11 @@ function ManufacturedProductsContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   
-  // 🧠 SENIOR REACT: Advanced duplicate prevention state management
-  const [duplicateWarning, setDuplicateWarning] = useState('');
-  const [duplicateWarningTimer, setDuplicateWarningTimer] = useState(null);
   
   // Price refresh visual feedback system removed
   const [formData, setFormData] = useState(() => {
-    // Initialize form data with persistence across navigation
-    try {
-      const savedFormData = sessionStorage.getItem(`productFormData_${id || 'new'}`);
-      if (savedFormData) {
-        const parsed = JSON.parse(savedFormData);
-        console.log('📋 Restored product form data from navigation:', parsed.title || 'New Product');
-        return parsed;
-      }
-    } catch (error) {
-      console.error('Error loading saved form data:', error);
-    }
+    // Initialize form data - will load from Firebase on mount
+    console.log('📋 Initializing form data, will load from Firebase...');
     
     // Default form structure - EXACT SAME as AddTender
     return {
@@ -82,16 +72,7 @@ function ManufacturedProductsContent() {
   const [showItemModal, setShowItemModal] = useState(false);
   const [selectedItemType, setSelectedItemType] = useState('');
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
-  const [documents, setDocuments] = useState(() => {
-    // Load documents from localStorage on initialization
-    try {
-      const savedDocs = localStorage.getItem(`productDocuments_${id || 'new'}`);
-      return savedDocs ? JSON.parse(savedDocs) : [];
-    } catch (error) {
-      console.error('Error loading saved documents:', error);
-      return [];
-    }
-  });
+  const [documents, setDocuments] = useState([]);
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [showFileNameModal, setShowFileNameModal] = useState(false);
   const [pendingFileData, setPendingFileData] = useState(null);
@@ -100,41 +81,7 @@ function ManufacturedProductsContent() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [editingItemIndex, setEditingItemIndex] = useState(-1);
-  const [productItems, setProductItems] = useState(() => {
-    // Load existing product items from localStorage on initialization
-    try {
-      console.log('🔍 INITIALIZING PRODUCT ITEMS - Debug Info:', {
-        currentId: id,
-        storageKey: `productItems_${id || 'new'}`,
-        localStorageKeys: Object.keys(localStorage).filter(key => key.includes('product'))
-      });
-      
-      let savedItems = localStorage.getItem(`productItems_${id || 'new'}`);
-      console.log('🔍 Found saved items:', savedItems);
-      
-      // If we're in edit mode and no items found, check if there are items under 'new' that should be transferred
-      if (!savedItems && id) {
-        const newItems = localStorage.getItem('productItems_new');
-        if (newItems) {
-          // Transfer items from 'new' to the actual ID
-          localStorage.setItem(`productItems_${id}`, newItems);
-          localStorage.removeItem('productItems_new');
-          savedItems = newItems;
-        }
-      }
-      
-      if (savedItems) {
-        const parsedItems = JSON.parse(savedItems);
-        console.log('🔍 Parsed product items:', parsedItems);
-        return parsedItems;
-      }
-      
-      return [];
-    } catch (error) {
-      console.error('Error loading product items:', error);
-      return [];
-    }
-  });
+  const [productItems, setProductItems] = useState([]);
 
   const handleToggle = () => {
     setSidebarCollapsed(!sidebarCollapsed);
@@ -340,7 +287,7 @@ function ManufacturedProductsContent() {
           console.log('✅ Manufactured product saved successfully with updated prices');
           
           // Show enhanced success message
-          showSuccess(`تم تحديث أسعار ${updatedCount} بند وحفظ المنتج المصنع بنجاح`, 'تم التحديث والحفظ');
+          // Price update completed - no automatic message needed
           
           // 🎯 NAVIGATE: Automatically navigate to manufactured products list
           setTimeout(() => {
@@ -353,9 +300,9 @@ function ManufacturedProductsContent() {
           showError(`تم تحديث الأسعار ولكن فشل حفظ المنتج: ${saveError?.message || saveError}`, 'تحذير');
         }
       } else if (updatedCount > 0) {
-        showSuccess(`تم تحديث أسعار ${updatedCount} بند من المصادر الأصلية`, 'تم تحديث الأسعار');
+        // Price update completed - no automatic message needed
       } else {
-        showSuccess('جميع الأسعار محدثة ومطابقة للمصادر الأصلية', 'الأسعار محدثة');
+        // All prices are up to date - no automatic message needed
       }
 
     } catch (error) {
@@ -403,20 +350,92 @@ function ManufacturedProductsContent() {
 
   // Load existing product if editing (wait for auth to be ready)
   useEffect(() => {
-    if (authReady) {
+    const loadData = async () => {
       if (isEditing) {
-        loadProduct();
+        await loadProduct();
       } else {
-        // Check for pending items from material selection pages
-        loadPendingItems();
+        // NEW MANUFACTURED PRODUCT MODE: Check for pending items first, then initialize empty if none
+        console.log('🆕 NEW MANUFACTURED PRODUCT MODE: Checking for pending items before clearing');
+        
+        // Check for pending items first
+        const pendingItems = await FirestorePendingDataService.getPendingProductItems();
+        const pendingDocuments = await FirestorePendingDataService.getPendingData(`productDocuments_${id || 'new'}`);
+        // Check for saved form data (from previous navigation to material pages) - EXACT SAME as AddTender
+        console.log('🔍 NEW MANUFACTURED PRODUCT: Checking for saved form data...');
+        console.log('🔐 AUTH STATE: authReady =', authReady, 'currentUser =', auth.currentUser ? 'EXISTS' : 'NULL');
+        
+        let savedFormData = null;
+        try {
+          savedFormData = await FirestorePendingDataService.getPendingData('productFormData_new');
+          console.log('📋 NEW MANUFACTURED PRODUCT: Saved form data result:', savedFormData);
+        } catch (error) {
+          console.error('❌ NEW MANUFACTURED PRODUCT: Error loading saved form data:', error);
+          console.error('❌ Error details:', error.message);
+        }
+        
+        if (savedFormData) {
+          console.log('📋 NEW MANUFACTURED PRODUCT: Restoring saved form data from previous session:', savedFormData);
+          setFormData(savedFormData);
+        } else {
+          console.log('📝 NEW MANUFACTURED PRODUCT: Starting with fresh empty form');
+          // Reset to empty form data for new products (same as AddTender pattern)
+          setFormData({
+            title: '',
+            referenceNumber: '',
+            description: '',
+            submissionDeadline: '',
+            estimatedValue: ''
+          });
+        }
+        
+        if (pendingItems && pendingItems.length > 0) {
+          console.log('🔄 NEW MANUFACTURED PRODUCT: Found pending items, loading them first');
+          setProductItems(pendingItems);
+          
+          // Calculate total from items
+          const totalFromItems = pendingItems.reduce((total, item) => {
+            return total + ((item.unitPrice || 0) * (item.quantity || 1));
+          }, 0);
+          
+          if (totalFromItems > 0) {
+            console.log(`💰 Setting estimated value from items: ${totalFromItems}`);
+            setFormData(prev => ({ ...prev, estimatedValue: totalFromItems.toString() }));
+          }
+          
+          // Show manual confirmation message that requires user interaction
+          showConfirm(
+            `تم إضافة ${pendingItems.length} عنصر للمنتج المصنع بنجاح.\n\nيمكنك الآن مراجعة البنود في القائمة أدناه.`,
+            () => {}, // Empty callback - just close the dialog
+            'تمت إضافة البنود',
+            'موافق', // OK button
+            '', // No cancel button
+            false // Don't show cancel
+          );
+        }
+        
+        if (pendingDocuments && pendingDocuments.length > 0) {
+          console.log('📁 NEW MANUFACTURED PRODUCT: Found pending documents, loading them');
+          setDocuments(pendingDocuments);
+        }
+        
+        if (savedFormData) {
+          console.log('📋 NEW MANUFACTURED PRODUCT: Found pending form data, loading it');
+          setFormData(prev => ({ ...prev, ...savedFormData }));
+        }
+        
+        // REMOVED: Aggressive clearing logic that was clearing form data when navigating to material pages
+        // Form data should persist unless explicitly cleared by user action
+        console.log('✅ NEW MANUFACTURED PRODUCT: Initialization completed (form data preserved)');
+        
+        console.log('✅ NEW MANUFACTURED PRODUCT: Initialization completed');
       }
       
       // Also check periodically for pending items (in case navigation timing is off)
-      const checkInterval = setInterval(() => {
-        const pendingItems = sessionStorage.getItem('pendingProductItems');
-        if (pendingItems && pendingItems !== 'null') {
+      const checkInterval = setInterval(async () => {
+        const pendingItems = await FirestorePendingDataService.getPendingProductItems();
+        if (pendingItems && pendingItems.length > 0) {
           console.log('🔄 Periodic check found pending items, loading...');
-          loadPendingItems();
+          await loadPendingItems();
         }
       }, 1000);
       
@@ -424,147 +443,171 @@ function ManufacturedProductsContent() {
       setTimeout(() => clearInterval(checkInterval), 10000);
       
       return () => clearInterval(checkInterval);
+    };
+    
+    if (authReady) {
+      console.log('🔐 AUTH READY: Starting to load data for manufactured products');
+      loadData();
+    } else {
+      console.log('⏳ AUTH NOT READY: Waiting for authentication...');
     }
   }, [id, authReady]);
 
-  // 🧠 SENIOR REACT: Advanced duplicate prevention with case-insensitive logic  
-  const clearDuplicateWarningAfterDelay = () => {
-    // Clear existing timer if any
-    if (duplicateWarningTimer) {
-      clearTimeout(duplicateWarningTimer);
-    }
-    
-    // Set new timer to clear warning after 4 seconds
-    const newTimer = setTimeout(() => {
-      setDuplicateWarning('');
-      setDuplicateWarningTimer(null);
-    }, 4000);
-    
-    setDuplicateWarningTimer(newTimer);
-  };
+  // REMOVED: Auto-save useEffect - now using immediate save on handleChange like AddTender
 
-  // 🧠 SENIOR REACT: Multi-level duplicate detection system
+  // 🧠 SENIOR REACT: Multi-level duplicate detection system (EXACT CLONE from AddTender)
   const checkForDuplicates = (existingItems, newItems) => {
     console.log('🧠 SENIOR REACT: Starting advanced duplicate prevention analysis...');
+    console.log('🔍 EXISTING ITEMS:', existingItems.map(item => ({
+      id: item.internalId || item.materialInternalId,
+      name: item.materialName || item.name
+    })));
+    console.log('🔍 NEW ITEMS:', newItems.map(item => ({
+      id: item.internalId || item.materialInternalId,
+      name: item.materialName || item.name
+    })));
     
     const duplicates = [];
     const uniqueItems = [];
     
-    // Create comprehensive comparison maps for existing items
-    const existingIdsMap = new Map();
-    const existingNamesMap = new Map();
+    // Create Maps for efficient lookups with multiple ID fields and case-insensitive names
+    const existingByInternalId = new Map();
+    const existingByMaterialId = new Map();
+    const existingByName = new Map();
     
     existingItems.forEach((item, index) => {
-      // ID-based mapping (multiple ID strategies)
-      const itemId = item.materialInternalId || item.internalId || item.id;
-      if (itemId) {
-        existingIdsMap.set(itemId, { item, index });
-      }
+      // Handle multiple ID fields
+      const internalId = item.internalId || item.materialInternalId;
+      const materialId = item.materialInternalId || item.internalId;
+      const itemName = (item.materialName || item.name || '').toLowerCase().trim();
       
-      // Name-based mapping (case-insensitive)
-      const itemName = (item.materialName || item.name || '').trim();
-      if (itemName) {
-        const normalizedName = itemName.toLowerCase();
-        existingNamesMap.set(normalizedName, { item, index });
-      }
+      console.log('📋 EXISTING ITEM:', { internalId, materialId, itemName });
+      
+      if (internalId) existingByInternalId.set(internalId, { item, index });
+      if (materialId) existingByMaterialId.set(materialId, { item, index });
+      if (itemName) existingByName.set(itemName, { item, index });
     });
-
-    console.log('🧠 DUPLICATE PREVENTION MAPS:', {
-      existingIdsCount: existingIdsMap.size,
-      existingNamesCount: existingNamesMap.size
-    });
-
-    // Check each new item for duplicates
+    
     newItems.forEach(newItem => {
-      const newItemId = newItem.materialInternalId || newItem.internalId || newItem.id;
-      const newItemName = (newItem.materialName || newItem.name || '').trim();
-      const normalizedNewName = newItemName.toLowerCase();
+      const newInternalId = newItem.internalId || newItem.materialInternalId;
+      const newMaterialId = newItem.materialInternalId || newItem.internalId;
+      const newItemName = (newItem.materialName || newItem.name || '').toLowerCase().trim();
+      
+      console.log('🆕 CHECKING NEW ITEM:', { newInternalId, newMaterialId, newItemName });
       
       let isDuplicate = false;
-      let duplicateType = '';
-      let duplicateMatch = null;
-
-      // 1. Check for ID-based duplicates (exact match)
-      if (newItemId && existingIdsMap.has(newItemId)) {
+      let duplicateInfo = null;
+      
+      // Check for ID-based duplicates (highest priority)
+      if (newInternalId && existingByInternalId.has(newInternalId)) {
+        console.log('🚨 DUPLICATE BY INTERNAL ID:', newInternalId);
         isDuplicate = true;
-        duplicateType = 'ID';
-        duplicateMatch = existingIdsMap.get(newItemId).item;
-        console.log(`🚨 ID DUPLICATE: ${newItemName} matches existing ID: ${newItemId}`);
+        duplicateInfo = {
+          type: 'ID',
+          displayName: newItem.materialName || newItem.name,
+          matchedItem: existingByInternalId.get(newInternalId).item
+        };
+      } else if (newMaterialId && existingByMaterialId.has(newMaterialId)) {
+        console.log('🚨 DUPLICATE BY MATERIAL ID:', newMaterialId);
+        isDuplicate = true;
+        duplicateInfo = {
+          type: 'ID',
+          displayName: newItem.materialName || newItem.name,
+          matchedItem: existingByMaterialId.get(newMaterialId).item
+        };
+      }
+      // Check for name-based duplicates (lower priority)
+      else if (newItemName && existingByName.has(newItemName)) {
+        console.log('🚨 DUPLICATE BY NAME:', newItemName);
+        isDuplicate = true;
+        duplicateInfo = {
+          type: 'NAME',
+          displayName: newItem.materialName || newItem.name,
+          matchedItem: existingByName.get(newItemName).item
+        };
       }
       
-      // 2. Check for name-based duplicates (case-insensitive)
-      if (!isDuplicate && newItemName && existingNamesMap.has(normalizedNewName)) {
-        isDuplicate = true;
-        duplicateType = 'NAME';
-        duplicateMatch = existingNamesMap.get(normalizedNewName).item;
-        console.log(`🚨 NAME DUPLICATE: "${newItemName}" matches existing name (case-insensitive)`);
-      }
-
       if (isDuplicate) {
-        duplicates.push({
-          newItem,
-          existingItem: duplicateMatch,
-          type: duplicateType,
-          displayName: newItemName || 'مادة غير محددة'
+        duplicates.push(duplicateInfo);
+        console.log('⚠️ DUPLICATE DETECTED:', {
+          newItem: newItem.materialName || newItem.name,
+          type: duplicateInfo.type,
+          matchedWith: duplicateInfo.matchedItem.materialName || duplicateInfo.matchedItem.name
         });
       } else {
         uniqueItems.push(newItem);
-        console.log(`✅ UNIQUE ITEM: ${newItemName} - Adding to list`);
-        
-        // Update maps with new item for subsequent checks
-        if (newItemId) {
-          existingIdsMap.set(newItemId, { item: newItem, index: -1 });
-        }
-        if (newItemName) {
-          existingNamesMap.set(normalizedNewName, { item: newItem, index: -1 });
-        }
+        console.log('✅ UNIQUE ITEM ADDED:', newItem.materialName || newItem.name);
       }
     });
-
-    console.log('🧠 DUPLICATE ANALYSIS COMPLETE:', {
+    
+    console.log('🛡️ DUPLICATE PREVENTION SUMMARY:', {
       totalNewItems: newItems.length,
-      uniqueItemsFound: uniqueItems.length,
       duplicatesFound: duplicates.length,
-      duplicateDetails: duplicates.map(d => ({ name: d.displayName, type: d.type }))
+      uniqueItemsToAdd: uniqueItems.length
     });
-
+    
     return { duplicates, uniqueItems };
   };
 
-  // Load pending items from sessionStorage (from material selection pages)
-  const loadPendingItems = () => {
+
+  // Load pending items from Firestore (from material selection pages)
+  const loadPendingItems = async () => {
     try {
-      console.log('🔍 Loading pending product items from sessionStorage...');
+      console.log('🔍 Loading pending product items from Firestore...');
       
-      const pendingItems = sessionStorage.getItem('pendingProductItems');
+      const pendingItems = await FirestorePendingDataService.getPendingProductItems();
       if (pendingItems) {
-        const parsedItems = JSON.parse(pendingItems);
+        const parsedItems = Array.isArray(pendingItems) ? pendingItems : JSON.parse(pendingItems);
         console.log('📦 Found pending product items:', parsedItems.length, 'items');
         
         // 🧠 SENIOR REACT: Enhanced duplicate prevention with case-insensitive logic
         setProductItems(prevItems => {
-          console.log('🛡️ SENIOR REACT: Starting advanced duplicate prevention system...');
+          // 🛡️ CRITICAL FIX: Only skip if items are truly identical (same length AND same IDs)
+          if (prevItems.length === parsedItems.length && prevItems.length > 0) {
+            // Check if items are actually the same by comparing IDs
+            const prevIds = prevItems.map(item => item.internalId || item.materialInternalId).sort();
+            const parsedIds = parsedItems.map(item => item.internalId || item.materialInternalId).sort();
+            
+            const itemsAreSame = prevIds.length === parsedIds.length && 
+              prevIds.every((id, index) => id === parsedIds[index]);
+            
+            if (itemsAreSame) {
+              console.log('🔄 ITEMS UNCHANGED: Same length and same IDs, skipping update');
+              return prevItems; // No change needed
+            }
+          }
           
-          const { duplicates, uniqueItems } = checkForDuplicates(prevItems, parsedItems);
+          console.log('🔄 ITEMS CHANGED: Different length or different IDs, processing update...');
+          console.log('📊 Prev items:', prevItems.length, 'Parsed items:', parsedItems.length);
           
-          // Handle duplicates with advanced warning system
-          if (duplicates.length > 0) {
-            const duplicateMessages = duplicates.map(dup => {
-              const matchType = dup.type === 'ID' ? 'معرف مطابق' : 'اسم مطابق';
-              return `⚠️ "${dup.displayName}" (${matchType})`;
-            });
+          console.log('🛡️ SENIOR REACT: Processing new/changed items...');
+          
+          // 🧠 SENIOR REACT: Simple replacement approach to prevent duplicates
+          let duplicates = [];
+          let uniqueItems = [];
+          
+          if (prevItems.length === 0) {
+            console.log('🆕 EMPTY STATE: Loading initial pending items');
+            duplicates = [];
+            uniqueItems = parsedItems;
+          } else {
+            console.log('🔄 EXISTING STATE: Checking for duplicates');
+            const result = checkForDuplicates(prevItems, parsedItems);
+            duplicates = result.duplicates;
+            uniqueItems = result.uniqueItems;
             
-            const warningMessage = `البنود التالية موجودة مسبقاً في المنتج المصنع:\n\n${duplicateMessages.join('\n')}`;
-            
-            // Set advanced warning with auto-clear
-            setDuplicateWarning(warningMessage);
-            clearDuplicateWarningAfterDelay();
-            
-            // Also show error alert for immediate feedback
-            showError(
-              `تم العثور على ${duplicates.length} بند مكرر. لن يتم إضافة البنود المكررة.`,
-              'بنود مكررة'
-            );
+            // Show duplicate message if needed
+            if (duplicates.length > 0) {
+              const duplicateMessages = duplicates.map(dup => {
+                const matchType = dup.type === 'ID' ? 'معرف مطابق' : 'اسم مطابق';
+                return `⚠️ "${dup.displayName}" (${matchType})`;
+              });
+              
+              showError(
+                `تم العثور على ${duplicates.length} بند مكرر. تم إضافة ${uniqueItems.length} بند جديد فقط.\n\n${duplicateMessages.join('\n')}`,
+                'بنود مكررة'
+              );
+            }
             
             console.log('🚨 DUPLICATES BLOCKED:', {
               count: duplicates.length,
@@ -574,8 +617,14 @@ function ManufacturedProductsContent() {
           
           const allItems = [...prevItems, ...uniqueItems];
           
-          // Save merged items to localStorage
-          localStorage.setItem(`productItems_${id || 'new'}`, JSON.stringify(allItems));
+          // Update estimated value from all items
+          const totalFromItems = allItems.reduce((total, item) => {
+            return total + ((item.unitPrice || 0) * (item.quantity || 1));
+          }, 0);
+          
+          setFormData(prev => {
+            return { ...prev, estimatedValue: totalFromItems.toString() };
+          });
           
           console.log('🛡️ SENIOR REACT DUPLICATE PREVENTION RESULT:', {
             existingCount: prevItems.length,
@@ -588,22 +637,22 @@ function ManufacturedProductsContent() {
           return allItems;
         });
         
-        // Clear session storage since we've loaded the items
-        sessionStorage.removeItem('pendingProductItems');
+        // 🔧 FIXED: Don't clear items immediately - keep them until product is saved
+        // Items will be cleared when product is submitted or cancelled
+        console.log('✅ Items loaded and ready - keeping in storage until product is saved');
       } else {
-        console.log('📦 No pending product items found in sessionStorage');
+        console.log('📦 No pending product items found in Firestore');
         
-        // Also check if there are existing items in localStorage that aren't loaded yet
-        const localItems = localStorage.getItem(`productItems_${id || 'new'}`);
-        if (localItems && productItems.length === 0) {
+        // Also check if there are existing items in Firestore that aren't loaded yet
+        const firestoreItems = await FirestorePendingDataService.getPendingData(`productItems_${id || 'new'}`);
+        if (firestoreItems && productItems.length === 0) {
           try {
-            const parsedLocalItems = JSON.parse(localItems);
-            if (parsedLocalItems.length > 0) {
-              console.log('📦 Loading existing product items from localStorage:', parsedLocalItems.length);
-              setProductItems(parsedLocalItems);
+            if (Array.isArray(firestoreItems) && firestoreItems.length > 0) {
+              console.log('📦 Loading existing product items from Firestore:', firestoreItems.length);
+              setProductItems(firestoreItems);
             }
-          } catch (localError) {
-            console.error('Error parsing localStorage items:', localError);
+          } catch (firestoreError) {
+            console.error('Error loading Firestore items:', firestoreError);
           }
         }
       }
@@ -612,38 +661,64 @@ function ManufacturedProductsContent() {
     }
   };
 
-  // 🧠 SENIOR REACT: Cleanup timer on unmount to prevent memory leaks
+
+  // 🧠 SENIOR REACT: Event-driven item loading system (EXACT CLONE from AddTender)
   useEffect(() => {
-    return () => {
-      if (duplicateWarningTimer) {
-        console.log('🧠 SENIOR REACT: Cleaning up duplicate warning timer on unmount');
-        clearTimeout(duplicateWarningTimer);
-      }
-    };
-  }, [duplicateWarningTimer]);
+    let debounceTimer = null;
+    let initialCheckTimeout = null;
 
-  // Also check for pending items when component mounts or when we return from material pages
-  useEffect(() => {
-    const handleFocus = () => {
-      if (authReady) {
-        console.log('🔍 Window focus - checking for pending product items...');
+    const handleWindowFocus = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        console.log('🔍 WINDOW FOCUS: Checking for pending product items...');
         loadPendingItems();
-      }
+      }, 500);
     };
 
-    const handleStorageChange = (e) => {
-      if (e.key === 'pendingProductItems' && authReady) {
-        console.log('🔍 Storage change detected for pendingProductItems');
+    const handleCustomEvent = (event) => {
+      console.log('🎯 CUSTOM EVENT: productItemsAdded detected');
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
         loadPendingItems();
+      }, 300);
+    };
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        console.log('🔍 PAGE VISIBLE: Checking for pending product items...');
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          loadPendingItems();
+        }, 500);
       }
     };
 
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('storage', handleStorageChange);
+    // Add event listeners
+    if (authReady) {
+      console.log('🎧 ADDING EVENT LISTENERS for product item detection');
+      
+      // Initial check after a delay
+      initialCheckTimeout = setTimeout(() => {
+        console.log('🔍 INITIAL CHECK: Looking for pending product items...');
+        loadPendingItems();
+      }, 1000);
+    }
     
+    window.addEventListener('focus', handleWindowFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('productItemsAdded', handleCustomEvent);
+
     return () => {
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('focus', handleWindowFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('productItemsAdded', handleCustomEvent);
+      
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      if (initialCheckTimeout) {
+        clearTimeout(initialCheckTimeout);
+      }
     };
   }, [authReady]);
 
@@ -671,14 +746,14 @@ function ManufacturedProductsContent() {
           doc && typeof doc === 'object' && doc.fileName && doc.fileURL
         );
         setDocuments(validDocuments);
-        localStorage.setItem(`productDocuments_${id}`, JSON.stringify(validDocuments));
+        // Documents will be loaded from Firestore directly, no need for pending data
         console.log('✅ Loaded product documents from Firebase database:', validDocuments.length);
       }
       
       // Load items if they exist  
       if (product.items && Array.isArray(product.items)) {
         setProductItems(product.items);
-        localStorage.setItem(`productItems_${id}`, JSON.stringify(product.items));
+        // Items will be loaded from Firestore directly, no need for pending data
       }
       
       console.log('✅ Loaded manufactured product successfully:', product.title);
@@ -691,8 +766,23 @@ function ManufacturedProductsContent() {
     }
   };
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
+  const handleChange = async (e) => {
+    const { name, value, type, checked } = e.target;
+    const newFormData = {
+      ...formData,
+      [name]: type === 'checkbox' ? checked : value
+    };
+    
+    setFormData(newFormData);
+    
+    // Save form data to FirestorePendingDataService for persistence during navigation - EXACT SAME as AddTender
+    try {
+      const formKey = id ? `productFormData_${id}` : 'productFormData_new';
+      await FirestorePendingDataService.setPendingData(formKey, newFormData);
+      console.log(`💾 Form data saved for field: ${name}`);
+    } catch (error) {
+      console.error('Error saving form data:', error);
+    }
     
     // Clear error for this field when user starts typing
     if (errors[name]) {
@@ -701,11 +791,6 @@ function ManufacturedProductsContent() {
         [name]: undefined
       }));
     }
-    
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
   };
 
   const validateForm = async () => {
@@ -784,6 +869,11 @@ function ManufacturedProductsContent() {
         
         showSuccess('تم تحديث المنتج المصنع بنجاح!', 'تم التحديث');
         
+        // Clear pending data after successful save (cleanup) - EXACT SAME as AddTender
+        await FirestorePendingDataService.clearPendingData(`productFormData_${id}`);
+        await FirestorePendingDataService.clearPendingData(`productDocuments_${id}`);
+        await FirestorePendingDataService.clearPendingProductItems();
+        
         // Navigate to list after successful update
         setTimeout(() => {
           navigate('/manufactured-products');
@@ -797,6 +887,11 @@ function ManufacturedProductsContent() {
         logActivity('task', `${user.name} أضاف منتج مصنع جديد`, `تم إضافة: ${formData.title}`);
         
         showSuccess('تم إضافة المنتج المصنع بنجاح!', 'تم الحفظ');
+        
+        // Clear pending data after successful save (cleanup) - EXACT SAME as AddTender
+        await FirestorePendingDataService.clearPendingData('productFormData_new');
+        await FirestorePendingDataService.clearPendingData('productDocuments_new');
+        await FirestorePendingDataService.clearPendingProductItems();
         
         // Navigate to list after successful creation
         setTimeout(() => {
@@ -830,15 +925,7 @@ function ManufacturedProductsContent() {
     return total;
   }, [productItems]);
 
-  // Persist form data across navigation
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(`productFormData_${id || 'new'}`, JSON.stringify(formData));
-      console.log('💾 Saved product form data for navigation persistence:', formData.title || 'New Product');
-    } catch (error) {
-      console.error('Error saving form data:', error);
-    }
-  }, [formData, id]);
+  // REMOVED: Duplicate form persistence useEffect (consolidated into auto-save above)
 
   const handleOpenItemModal = () => {
     setShowItemModal(true);
@@ -864,11 +951,11 @@ function ManufacturedProductsContent() {
 
 
   // Function to remove product item - EXACT SAME as AddTender (simple direct removal)
-  const removeProductItem = (indexToRemove) => {
+  const removeProductItem = async (indexToRemove) => {
     setProductItems(prevItems => {
       const updatedItems = prevItems.filter((_, index) => index !== indexToRemove);
-      // Update localStorage immediately
-      localStorage.setItem(`productItems_${id || 'new'}`, JSON.stringify(updatedItems));
+      // Update Firestore immediately
+      FirestorePendingDataService.setPendingData(`productItems_${id || 'new'}`, updatedItems);
       return updatedItems;
     });
   };
@@ -890,11 +977,12 @@ function ManufacturedProductsContent() {
 
   // Function to handle quantity change in edit modal
   const handleEditQuantityChange = (newQuantity) => {
-    const quantity = Math.max(1, parseInt(newQuantity) || 1);
+    // Allow any positive number for manual input, no restrictions
+    const quantity = Math.max(0, parseFloat(newQuantity) || 0);
     setEditingItem(prev => ({
       ...prev,
-      quantity,
-      totalPrice: (prev.unitPrice || 0) * quantity
+      quantity: Number(quantity.toFixed(1)),
+      totalPrice: (prev.unitPrice || 0) * Number(quantity.toFixed(1))
     }));
   };
 
@@ -911,8 +999,8 @@ function ManufacturedProductsContent() {
       const updatedItems = [...prevItems];
       updatedItems[editingItemIndex] = editingItem;
       
-      // Update localStorage immediately
-      localStorage.setItem(`productItems_${id || 'new'}`, JSON.stringify(updatedItems));
+      // Update Firestore immediately
+      FirestorePendingDataService.setPendingData(`productItems_${id || 'new'}`, updatedItems);
       
       console.log('✅ Item updated successfully:', editingItem);
       return updatedItems;
@@ -936,8 +1024,21 @@ function ManufacturedProductsContent() {
     setEditingItemIndex(-1);
   };
 
-  // Handle cancel button - EXACT SAME as AddTender
-  const handleCancel = () => {
+  // Handle cancel button - Clear pending data like AddTender
+  const handleCancel = async () => {
+    try {
+      // Clear all pending data when canceling product creation
+      if (!isEditing) {
+        console.log('🧹 CANCEL: Clearing all pending data for cancelled new manufactured product');
+        await FirestorePendingDataService.clearPendingData(`productFormData_${id || 'new'}`);
+        await FirestorePendingDataService.clearPendingData(`productDocuments_${id || 'new'}`);
+        await FirestorePendingDataService.clearPendingProductItems();
+        console.log('✅ CANCEL: All pending data cleared successfully');
+      }
+    } catch (error) {
+      console.error('Error clearing pending data on cancel:', error);
+    }
+    
     navigate('/manufactured-products');
   };
 
@@ -1022,9 +1123,9 @@ function ManufacturedProductsContent() {
       // Add to documents list
       setDocuments(prev => [...prev, newDocument]);
       
-      // Save to localStorage
+      // Save to Firestore
       const updatedDocs = [...documents, newDocument];
-      localStorage.setItem(`productDocuments_${id || 'new'}`, JSON.stringify(updatedDocs));
+      await FirestorePendingDataService.setPendingData(`productDocuments_${id || 'new'}`, updatedDocs);
       
       console.log('✅ Document added to list:', newDocument);
       
@@ -1071,9 +1172,9 @@ function ManufacturedProductsContent() {
       // Remove from local state (equivalent to "delete from original collection")
       setDocuments(prev => prev.filter(doc => doc.id !== document.id));
       
-      // Update localStorage
+      // Update Firestore
       const updatedDocs = documents.filter(doc => doc.id !== document.id);
-      localStorage.setItem(`productDocuments_${id || 'new'}`, JSON.stringify(updatedDocs));
+      await FirestorePendingDataService.setPendingData(`productDocuments_${id || 'new'}`, updatedDocs);
       
       // Log activity
       const currentUser = getCurrentUser();
@@ -1091,7 +1192,7 @@ function ManufacturedProductsContent() {
   return (
     <>
       <div className={`page-wrapper ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} dir="rtl">
-        <Header onToggle={handleToggle} />
+          <Header onToggle={handleToggle} />
         
         <div className="main-container" style={{
           paddingRight: sidebarCollapsed ? '72px' : '250px',
@@ -1209,37 +1310,6 @@ function ManufacturedProductsContent() {
                           </div>
                         )}
 
-                        {/* 🧠 SENIOR REACT: Advanced duplicate warning display with auto-clear */}
-                        {duplicateWarning && (
-                          <div 
-                            className="alert alert-warning border-warning shadow-sm"
-                            style={{ 
-                              borderLeft: '4px solid #ffc107',
-                              backgroundColor: '#fff3cd',
-                              color: '#856404',
-                              borderRadius: '8px',
-                              whiteSpace: 'pre-line',
-                              animation: 'fadeIn 0.3s ease-in-out'
-                            }}
-                          >
-                            <div className="d-flex align-items-start">
-                              <i className="bi bi-exclamation-triangle-fill text-warning me-3 mt-1" style={{ fontSize: '18px' }}></i>
-                              <div className="flex-grow-1">
-                                <h6 className="fw-bold mb-2 text-warning">
-                                  <i className="bi bi-shield-exclamation me-2"></i>
-                                  تحذير: بنود مكررة
-                                </h6>
-                                <div style={{ fontSize: '14px', lineHeight: '1.4' }}>
-                                  {duplicateWarning}
-                                </div>
-                                <small className="text-muted d-block mt-2">
-                                  <i className="bi bi-clock me-1"></i>
-                                  سيختفي هذا التحذير تلقائياً خلال 4 ثوانٍ
-                                </small>
-                              </div>
-                            </div>
-                          </div>
-                        )}
 
                         <div className="row">
                           <div className="col-md-8 mb-3">
@@ -1984,8 +2054,8 @@ function ManufacturedProductsContent() {
                             <button 
                               type="button" 
                               className="btn btn-outline-secondary btn-sm"
-                              onClick={() => handleEditQuantityChange(editingItem.quantity - 1)}
-                              disabled={editingItem.quantity <= 1}
+                              onClick={() => handleEditQuantityChange(Math.max(0, Number((editingItem.quantity - 0.1).toFixed(1))))}
+                              disabled={editingItem.quantity <= 0}
                               style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                             >
                               <i className="bi bi-dash"></i>
@@ -1994,14 +2064,20 @@ function ManufacturedProductsContent() {
                               type="number"
                               className="form-control text-center mx-2"
                               style={{ width: '80px', height: '32px', borderRadius: '6px' }}
-                              value={editingItem.quantity || 1}
-                              min="1"
+                              value={editingItem.quantity || 0}
+                              min="0"
+                              step="any"
                               onChange={(e) => handleEditQuantityChange(e.target.value)}
+                              onBlur={(e) => {
+                                // Format to 1 decimal place when user finishes editing
+                                const formattedValue = Number(e.target.value || 0).toFixed(1);
+                                handleEditQuantityChange(formattedValue);
+                              }}
                             />
                             <button 
                               type="button" 
                               className="btn btn-outline-secondary btn-sm"
-                              onClick={() => handleEditQuantityChange(editingItem.quantity + 1)}
+                              onClick={() => handleEditQuantityChange(Number((editingItem.quantity + 0.1).toFixed(1)))}
                               style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                             >
                               <i className="bi bi-plus"></i>
@@ -2018,7 +2094,7 @@ function ManufacturedProductsContent() {
                             {Math.round(editingItem.totalPrice || 0)} ريال
                           </div>
                           <small className="text-success">
-                            ({editingItem.quantity || 1} × {Math.round(editingItem.unitPrice || 0)})
+                            ({(editingItem.quantity || 0.1).toFixed(1)} × {Math.round(editingItem.unitPrice || 0)})
                           </small>
                         </td>
                       </tr>
@@ -2035,7 +2111,7 @@ function ManufacturedProductsContent() {
                       {Math.round(editingItem.totalPrice || 0)} ريال
                     </span>
                     <span className="badge bg-info ms-2">
-                      {editingItem.quantity || 1} {editingItem.materialUnit || editingItem.unit || 'قطعة'}
+                      {(editingItem.quantity || 0.1).toFixed(1)} {editingItem.materialUnit || editingItem.unit || 'قطعة'}
                     </span>
                   </div>
                   <div className="d-flex gap-2">
@@ -2078,6 +2154,7 @@ function ManufacturedProductsContent() {
           </div>
         </div>
       )}
+
     </>
   );
 }

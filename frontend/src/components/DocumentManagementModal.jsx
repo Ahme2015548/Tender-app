@@ -5,6 +5,7 @@ import ModernSpinner from './ModernSpinner';
 import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import { useActivity } from './ActivityManager';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 
 const DocumentManagementModal = ({ 
   show, 
@@ -26,16 +27,19 @@ const DocumentManagementModal = ({
   const { alertConfig, closeAlert, showSuccess, showError, showConfirm } = useCustomAlert();
   const { logActivity, getCurrentUser } = useActivity();
 
-  // Save documents to localStorage whenever they change
+  // Save documents to Firestore whenever they change
   useEffect(() => {
-    if (show && setDocuments) {
-      try {
-        localStorage.setItem(`${storageKey}_${entityId}`, JSON.stringify(documents));
-        console.log('Saved documents to localStorage:', documents.length, 'documents');
-      } catch (error) {
-        console.error('Error saving documents:', error);
+    const saveDocuments = async () => {
+      if (show && setDocuments) {
+        try {
+          await FirestorePendingDataService.setPendingData(`${storageKey}_${entityId}`, documents);
+          console.log('Saved documents to Firestore session:', documents.length, 'documents');
+        } catch (error) {
+          console.error('Error saving documents:', error);
+        }
       }
-    }
+    };
+    saveDocuments();
   }, [documents, entityId, storageKey, show, setDocuments]);
 
   // Listen for document restoration from trash
@@ -47,10 +51,11 @@ const DocumentManagementModal = ({
     const handleStorageEvent = (event) => {
       const expectedKey = `${storageKey}_${currentEntityId}`;
       
+      // Firestore real-time listeners handle data sync automatically
       if (event.key === expectedKey && event.newValue) {
         try {
           const restoredDocuments = JSON.parse(event.newValue);
-          console.log('📄 Restoring documents from storage event:', restoredDocuments.length);
+          console.log('📄 Restoring documents from Firestore sync:', restoredDocuments.length);
           setDocuments(restoredDocuments);
           
           // Find the most recently restored document

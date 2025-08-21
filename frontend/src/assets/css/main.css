@@ -13344,25 +13344,25 @@ a:hover {
 }
 
 .bg-1 {
-  background: url("../images/pattern.jpg");
+  background: url("/images/pattern.jpg");
   background-position: center center;
   background-size: cover;
 }
 
 .bg-2 {
-  background: url("../images/pattern2.jpg");
+  background: url("/images/pattern2.jpg");
   background-position: bottom center;
   background-size: cover;
 }
 
 .bg-3 {
-  background: url("../images/pattern3.jpg");
+  background: url("/images/pattern3.jpg");
   background-position: center center;
   background-size: cover;
 }
 
 .bg-4 {
-  background: url("../images/pattern4.jpg");
+  background: url("/images/pattern4.jpg");
   background-position: center center;
   background-size: cover;
 }
@@ -13651,7 +13651,7 @@ a:hover {
   position: absolute;
   right: 0;
   top: 10px;
-  background: url(../images/menu-arrow.svg);
+  background: url(/images/menu-arrow.svg);
   background-repeat: no-repeat;
   width: 14px;
   height: 32px;
@@ -13680,7 +13680,7 @@ a:hover {
   position: absolute;
   right: 0;
   top: 10px;
-  background: url(../images/menu-arrow.svg);
+  background: url(/images/menu-arrow.svg);
   background-size: 100%;
   background-repeat: no-repeat;
   width: 14px;
@@ -13927,7 +13927,7 @@ a:hover {
 
 .activity-block:before {
   content: "";
-  background: url(../images/curve-line.svg) repeat-y;
+  background: url(/images/curve-line.svg) repeat-y;
   position: absolute;
   left: 40px;
   top: 0;
@@ -14072,7 +14072,7 @@ a:hover {
  ********************
 ********************/
 .error-screen {
-  background: url(../images/dots.svg) no-repeat;
+  background: url(/images/dots.svg) no-repeat;
   background-position: center center;
   background-size: cover;
 }
@@ -14083,4 +14083,61 @@ a:hover {
 
 img.login-logo {
   width: 150px;
+}
+
+/* SUBMENU ACTIVE STYLING - MATCH MAIN SIDEBAR ITEMS */
+/* Force submenu active items to have same blue background as main items */
+.sidebar-menu .treeview-menu > li.active,
+.sidebar-menu .treeview-menu > li.active > a,
+.sidebar-menu .treeview-menu > li.active > a:hover,
+.sidebar-menu .treeview-menu > li.active > a:focus,
+
+/* SUBMENU ACTIVE STYLING - MATCH MAIN SIDEBAR ITEMS */
+/* Force submenu active items to have same blue background as main items */
+.sidebar-menu .treeview-menu > li.active,
+
+/* SUBMENU ACTIVE STYLING - EXACT MATCH TO MAIN SIDEBAR ITEMS */
+/* Force submenu active items to have same blue background and styling as main items */
+.sidebar-menu .treeview-menu > li.active,
+.sidebar-menu .treeview-menu > li.active > a,
+.sidebar-menu .treeview-menu > li.active > a:hover,
+.sidebar-menu .treeview-menu > li.active > a:focus,
+.sidebar-menu .treeview-menu > li.active > a.active-sub,
+.sidebar-menu .treeview-menu > li.active > a.active-sub:hover {
+  background-color: #007bff !important;
+  color: #fff !important;
+  border-radius: 4px !important;
+  position: relative !important;
+}
+
+/* White triangular arrow indicator for active submenu items */
+.sidebar-menu .treeview-menu > li.active > a::after {
+  content: "" !important;
+  position: absolute !important;
+  right: 0 !important;
+  top: 10px !important;
+  background: url(/images/menu-arrow.svg) !important;
+  background-repeat: no-repeat !important;
+  width: 14px !important;
+  height: 32px !important;
+}
+
+/* RTL support for submenu arrow */
+[dir="rtl"] .sidebar-menu .treeview-menu > li.active > a::after {
+  right: auto !important;
+  left: 0 !important;
+  transform: scaleX(-1) !important;
+}
+
+/* Force submenu active icons to stay blue like main items */
+.sidebar-menu .treeview-menu > li.active i,
+.sidebar-menu .treeview-menu > li.active > a i {
+  color: #007bff !important;
+}
+
+/* Force submenu active text to stay white */
+.sidebar-menu .treeview-menu > li.active .menu-text,
+.sidebar-menu .treeview-menu > li.active span,
+.sidebar-menu .treeview-menu > li.active > a span {
+  color: #fff !important;
 }

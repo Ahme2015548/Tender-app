@@ -1,11 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import SidebarButtons from '../components/SidebarButtons';
 import SimpleActivityTimeline from '../components/SimpleActivityTimeline';
 import ManualActivityCreator from '../components/ManualActivityCreator';
-import { TenderService } from '../services/TenderService';
+import { tenderServiceNew } from '../services/TenderServiceNew';
+import TenderService from '../services/TenderService';
 import { UniqueValidationService } from '../services/uniqueValidationService';
 import { useActivity } from '../components/ActivityManager';
 import { ActivityProvider, AutoActivityTracker } from '../components/ActivityManager';
@@ -14,11 +15,14 @@ import CustomAlert from '../components/CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import ItemSelectionModal from '../components/ItemSelectionModal';
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
-import { TenderItemsService } from '../services/TenderItemsService';
+import { TenderItemsServiceNew } from '../services/TenderItemsServiceNew';
 import { formatDateForInput } from '../utils/dateUtils';
 import fileStorageService from '../services/fileStorageService';
 import { SimpleTrashService } from '../services/simpleTrashService';
 import TenderDocumentModal from '../components/TenderDocumentModal';
+import { FirestoreTenderItemsService } from '../services/FirestoreTenderItemsService';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
+import { FirestoreDocumentService } from '../services/FirestoreDocumentService';
 
 function AddTenderContent() {
   const navigate = useNavigate();
@@ -30,33 +34,17 @@ function AddTenderContent() {
   const isEditing = !!id;
   
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [formData, setFormData] = useState(() => {
-    // SENIOR REACT: Initialize form data with persistence across navigation
-    try {
-      const savedFormData = sessionStorage.getItem(`tenderFormData_${id || 'new'}`);
-      if (savedFormData) {
-        const parsed = JSON.parse(savedFormData);
-        console.log('📋 Restored tender form data from navigation:', parsed.title || 'New Tender');
-        return parsed;
-      }
-    } catch (error) {
-      console.error('Error loading saved form data:', error);
-    }
-    
-    // Default form structure
-    return {
-      title: '',
-      referenceNumber: '',
-      entity: '',
-      description: '',
-      submissionDeadline: '',
-      estimatedValue: '',
-      category: '',
-      location: '',
-      contactPerson: '',
-      contactPhone: '',
-      contactEmail: ''
-    };
+  const [formData, setFormData] = useState({
+    title: '',
+    referenceNumber: '',
+    entity: '',
+    description: '',
+    submissionDeadline: '',
+    estimatedValue: '',
+    location: '',
+    contactPerson: '',
+    contactPhone: '',
+    contactEmail: ''
   });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -64,80 +52,316 @@ function AddTenderContent() {
   const [showItemModal, setShowItemModal] = useState(false);
   const [selectedItemType, setSelectedItemType] = useState('');
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
-  const [documents, setDocuments] = useState(() => {
-    // Load documents from localStorage on initialization
-    try {
-      const savedDocs = localStorage.getItem(`tenderDocuments_${id || 'new'}`);
-      return savedDocs ? JSON.parse(savedDocs) : [];
-    } catch (error) {
-      console.error('Error loading saved documents:', error);
-      return [];
-    }
-  });
+  const [documents, setDocuments] = useState([]);
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [showFileNameModal, setShowFileNameModal] = useState(false);
   const [pendingFileData, setPendingFileData] = useState(null);
   const [customFileName, setCustomFileName] = useState('');
   const [deleting, setDeleting] = useState(false);
-  const [tenderItems, setTenderItems] = useState(() => {
-    // Load existing tender items from localStorage on initialization
-    try {
-      console.log('🔍 INITIALIZING TENDER ITEMS - Debug Info:', {
-        currentId: id,
-        storageKey: `tenderItems_${id || 'new'}`,
-        localStorageKeys: Object.keys(localStorage).filter(key => key.includes('tender'))
-      });
-      
-      let savedItems = localStorage.getItem(`tenderItems_${id || 'new'}`);
-      console.log('🔍 Found saved items:', savedItems);
-      
-      // If we're in edit mode and no items found, check if there are items under 'new' that should be transferred
-      if (!savedItems && id) {
-        const newItems = localStorage.getItem('tenderItems_new');
-        if (newItems) {
-          // Transfer items from 'new' to the actual ID
-          localStorage.setItem(`tenderItems_${id}`, newItems);
-          localStorage.removeItem('tenderItems_new');
-          savedItems = newItems;
-          console.log('Migrated tender items from new to ID:', id);
-        }
-      }
-      
-      const parsedItems = savedItems ? JSON.parse(savedItems) : [];
-      console.log('🔍 FINAL PARSED TENDER ITEMS:', parsedItems);
-      
-      
-      return parsedItems;
-    } catch (error) {
-      console.error('Error loading saved tender items:', error);
-      return [];
-    }
-  });
-
-  // 🧠 SENIOR REACT: Advanced duplicate prevention state management (EXACT CLONE from ManufacturedProducts)
-  const [duplicateWarning, setDuplicateWarning] = useState('');
-  const [duplicateWarningTimer, setDuplicateWarningTimer] = useState(null);
+  const [tenderItems, setTenderItems] = useState([]);
+  
+  // ✅ ID-based duplicate prevention tracking
+  const [selectedItemIds, setSelectedItemIds] = useState([]);
 
   // 🧠 SENIOR REACT: Edit modal state management for tender items
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [editingIndex, setEditingIndex] = useState(null);
+  
+  // 🔒 Simple processing lock
+  const [isProcessingPendingItems, setIsProcessingPendingItems] = useState(false);
+  const [hasShownSuccessMessage, setHasShownSuccessMessage] = useState(false);
 
-  // 🧠 SENIOR REACT: Advanced warning clear function (EXACT CLONE from ManufacturedProducts)
-  const clearDuplicateWarningAfterDelay = () => {
-    // Clear existing timer if any
-    if (duplicateWarningTimer) {
-      clearTimeout(duplicateWarningTimer);
-    }
+
+  // 🧠 SENIOR REACT: Multi-level duplicate detection system (EXACT CLONE from ManufacturedProducts)
+
+  // 🧠 SENIOR REACT: SINGLE SOURCE OF TRUTH - Consolidated initialization
+  useEffect(() => {
+    const initializeData = async () => {
+      try {
+        setLoadingData(true);
+        console.log('🚀 SENIOR REACT: Starting unified data initialization...');
+        
+        // 🔍 STEP 1: Check for pending items ONLY for NEW tenders
+        if (!id) {
+          console.log('📦 NEW TENDER: Loading pending tender items...');
+          const pendingItems = await FirestorePendingDataService.getPendingTenderItems();
+          if (pendingItems && Array.isArray(pendingItems) && pendingItems.length > 0) {
+            console.log('✅ NEW TENDER: Found', pendingItems.length, 'pending items - SETTING STATE IMMEDIATELY');
+            console.log('📋 PENDING ITEMS DATA:', pendingItems.map(item => ({
+              id: item.internalId || item.materialInternalId,
+              name: item.materialName || item.name || 'UNNAMED'
+            })));
+            
+            setTenderItems(pendingItems);
+            
+            // ✅ Load item IDs for duplicate prevention in new tender mode
+            const newTenderIds = pendingItems.map(item => 
+              item.internalId || item.materialInternalId || item.id
+            ).filter(id => id);
+            setSelectedItemIds(newTenderIds);
+            console.log('✅ Loaded item IDs for new tender mode:', newTenderIds);
+            
+            console.log('🎯 NEW TENDER STATE SET: Items initialized with pending data');
+          } else {
+            console.log('📦 NEW TENDER: No pending items found');
+          }
+        } else {
+          console.log('🏷️ EDIT MODE: Skipping pending items check - will load from saved tender');
+        }
+        
+        // Firebase services are auto-initialized with auth
+        
+        if (id) {
+          // 🧠 SENIOR REACT: EDIT MODE REWRITTEN TO MATCH CREATION MODE EXACTLY
+          console.log('🎯 EDIT MODE: Starting - IDENTICAL to creation mode logic');
+          
+          const tender = await tenderServiceNew.getById(id);
+          if (!tender) {
+            console.error('❌ EDIT MODE: Tender not found');
+            return;
+          }
+          
+          console.log('📄 EDIT MODE: Tender loaded:', tender.title);
+          
+          // STEP 1: Handle saved form data (EXACTLY like creation mode)
+          const savedFormData = await FirestorePendingDataService.getPendingData(`tenderFormData_${id}`);
+          if (savedFormData && Object.keys(savedFormData).some(key => savedFormData[key])) {
+            console.log('📋 EDIT MODE: Found saved form changes, using them');
+            const mergedData = { ...tender, ...savedFormData };
+            setFormData(mergedData);
+          } else {
+            console.log('📋 EDIT MODE: Using original tender data');
+            const restoreFormData = { ...tender };
+            
+            // 🔧 FIX: Handle all possible date field variations with safe conversion
+            if (restoreFormData.submissionDeadline) {
+              // Handle Firestore timestamp objects
+              let dateValue = restoreFormData.submissionDeadline;
+              if (dateValue && typeof dateValue === 'object' && dateValue.seconds) {
+                // Firestore timestamp
+                dateValue = new Date(dateValue.seconds * 1000);
+              } else if (dateValue && typeof dateValue === 'object' && dateValue.toDate) {
+                // Firestore timestamp with toDate method
+                dateValue = dateValue.toDate();
+              }
+              restoreFormData.submissionDeadline = formatDateForInput(dateValue);
+            }
+            if (restoreFormData.deadline) {
+              let dateValue = restoreFormData.deadline;
+              if (dateValue && typeof dateValue === 'object' && dateValue.seconds) {
+                dateValue = new Date(dateValue.seconds * 1000);
+              } else if (dateValue && typeof dateValue === 'object' && dateValue.toDate) {
+                dateValue = dateValue.toDate();
+              }
+              restoreFormData.submissionDeadline = formatDateForInput(dateValue);
+              delete restoreFormData.deadline;
+            }
+            if (restoreFormData.submissionDate) {
+              let dateValue = restoreFormData.submissionDate;
+              if (dateValue && typeof dateValue === 'object' && dateValue.seconds) {
+                dateValue = new Date(dateValue.seconds * 1000);
+              } else if (dateValue && typeof dateValue === 'object' && dateValue.toDate) {
+                dateValue = dateValue.toDate();
+              }
+              restoreFormData.submissionDeadline = formatDateForInput(dateValue);
+              delete restoreFormData.submissionDate;
+            }
+            
+            // Check if there's pending form data (user changes before navigation)
+            const pendingFormData = await FirestorePendingDataService.getPendingData(`tenderFormData_${id}`);
+            if (pendingFormData) {
+              console.log('📋 EDIT MODE: Found pending form changes, merging with tender data');
+              Object.assign(restoreFormData, pendingFormData);
+            }
+            
+            setFormData(restoreFormData);
+          }
+          
+          // 🔧 FIX: ALWAYS load documents and items regardless of form data path
+          // Load documents from Firestore
+          if (tender.documents && Array.isArray(tender.documents)) {
+            setDocuments(tender.documents);
+          }
+          
+          // 🔧 FIX: Load tender items WITH pending items merge
+          // Step 1: Get any new pending items from material pages
+          const pendingItems = await FirestorePendingDataService.getPendingTenderItems();
+          
+          // Step 2: Start with existing saved items
+          let allTenderItems = [];
+          if (tender.items && Array.isArray(tender.items)) {
+            console.log('✅ EDIT MODE: Found existing saved items:', tender.items.length);
+            allTenderItems = [...tender.items];
+          }
+          
+          // Step 3: Add new pending items if any (with duplicate prevention)
+          if (pendingItems && pendingItems.length > 0) {
+            console.log('📦 EDIT MODE: Found pending items from material pages:', pendingItems.length);
+            
+            // Get existing item IDs for duplicate prevention
+            const existingIds = allTenderItems.map(item => 
+              item.internalId || item.materialInternalId || item.id
+            ).filter(id => id);
+            
+            // Filter out duplicates and add new items
+            const newItems = pendingItems.filter(pendingItem => {
+              const pendingId = pendingItem.internalId || pendingItem.materialInternalId || pendingItem.id;
+              return pendingId && !existingIds.includes(pendingId);
+            });
+            
+            if (newItems.length > 0) {
+              console.log('✅ Adding new items to tender:', newItems.length);
+              allTenderItems = [...allTenderItems, ...newItems];
+            } else {
+              console.log('⚠️ All pending items were duplicates, skipping');
+            }
+            
+            // Clear pending items now that we've processed them
+            await FirestorePendingDataService.clearPendingTenderItems();
+            console.log('🧹 EDIT MODE: Cleared pending items after merging');
+          }
+          
+          // Step 4: Set the final merged items
+          if (allTenderItems.length > 0) {
+            console.log('📦 FINAL ITEMS LIST:', allTenderItems.map(item => ({
+              internalId: item.internalId || item.materialInternalId,
+              materialName: item.materialName || item.name,
+              supplierInfo: item.supplierInfo,
+              unitPrice: item.unitPrice,
+              quantity: item.quantity,
+              totalPrice: item.totalPrice
+            })));
+            
+            setTenderItems(allTenderItems);
+            
+            // Load all item IDs for duplicate prevention
+            const allIds = allTenderItems.map(item => 
+              item.internalId || item.materialInternalId || item.id
+            ).filter(id => id);
+            setSelectedItemIds(allIds);
+            console.log('✅ Loaded all item IDs for edit mode:', allIds);
+            
+            // Update estimated value from all items
+            const totalFromItems = allTenderItems.reduce((total, item) => {
+              return total + ((item.unitPrice || item.price || 0) * (item.quantity || 1));
+            }, 0);
+            setFormData(prev => ({ ...prev, estimatedValue: totalFromItems.toString() }));
+            
+            console.log('🎯 EDIT MODE STATE SET: Final items count:', allTenderItems.length);
+          } else {
+            console.log('📦 EDIT MODE: No items to load');
+          }
+        } else {
+          // NEW TENDER MODE: Check for saved form data first, then initialize
+          console.log('🆕 NEW TENDER MODE: Checking for saved form data...');
+          
+          // Check for saved form data (from previous navigation to material pages)
+          const savedFormData = await FirestorePendingDataService.getPendingData('tenderFormData_new');
+          
+          if (savedFormData) {
+            console.log('📋 NEW TENDER: Restoring saved form data from previous session');
+            setFormData(savedFormData);
+          } else {
+            console.log('📝 NEW TENDER: Starting with fresh empty form');
+            // Start with empty form data for new tenders
+            setFormData({
+              title: '',
+              referenceNumber: '',
+              entity: '',
+              description: '',
+              submissionDeadline: '',
+              estimatedValue: '',
+              category: '',
+              location: '',
+              contactPerson: '',
+              contactPhone: '',
+              contactEmail: ''
+            });
+          }
+          
+          // Check for saved documents
+          const savedDocuments = await FirestorePendingDataService.getPendingData('tenderDocuments_new');
+          if (savedDocuments && Array.isArray(savedDocuments)) {
+            console.log('📄 NEW TENDER: Restoring saved documents');
+            setDocuments(savedDocuments);
+          } else {
+            setDocuments([]);
+          }
+          
+          // Check for pending items (from material selection pages)
+          const pendingItems = await FirestorePendingDataService.getPendingTenderItems();
+          
+          if (pendingItems && pendingItems.length > 0) {
+            console.log('🔄 NEW TENDER: Found pending items, adding to form');
+            
+            // 🎯 CRITICAL FIX: Only show success message if items are newly added (not reloaded)
+            const successMessageKey = 'tender_success_shown_new';
+            const isAlreadyShown = localStorage.getItem(successMessageKey) === 'true';
+            const shouldShowMessage = tenderItems.length === 0 && !hasShownSuccessMessage && !isAlreadyShown;
+            
+            setTenderItems(pendingItems);
+            
+            // Calculate total from items and update estimated value
+            const totalFromItems = pendingItems.reduce((total, item) => {
+              return total + ((item.unitPrice || 0) * (item.quantity || 1));
+            }, 0);
+            
+            if (totalFromItems > 0) {
+              console.log(`💰 Updating estimated value from items: ${totalFromItems}`);
+              const updatedFormData = { ...(savedFormData || formData), estimatedValue: totalFromItems.toString() };
+              setFormData(updatedFormData);
+              
+              // Save updated form data with calculated total
+              await FirestorePendingDataService.setPendingData('tenderFormData_new', updatedFormData);
+            }
+            
+            // Only show success message for genuinely new items (not reloads)
+            if (shouldShowMessage) {
+              setHasShownSuccessMessage(true);
+              localStorage.setItem(successMessageKey, 'true');
+              showConfirm(
+                `تم إضافة ${pendingItems.length} عنصر للمناقصة بنجاح.\n\nيمكنك الآن مراجعة البنود ومتابعة ملء بيانات المناقصة.`,
+                () => {}, // Empty callback - just close the dialog
+                'تمت إضافة البنود',
+                'موافق', // OK button
+                '', // No cancel button
+                false // Don't show cancel
+              );
+            } else {
+              console.log('🔕 Success message skipped (items already exist or already shown)');
+            }
+          } else {
+            // No pending items
+            setTenderItems([]);
+          }
+          
+          console.log('✅ NEW TENDER: Form initialized with persistence');
+        }
+        
+        console.log('✅ Data initialization completed');
+        
+        // ✅ FIXED: Removed aggressive periodic checking that was causing continuous adding
+        // Event-based loading (focus, visibility, custom events) is sufficient
+        
+      } catch (error) {
+        console.error('Error initializing data:', error);
+        showError('فشل في تحميل البيانات', 'خطأ');
+      } finally {
+        setLoadingData(false);
+      }
+    };
     
-    // Set new timer to clear warning after 4 seconds
-    const newTimer = setTimeout(() => {
-      setDuplicateWarning('');
-      setDuplicateWarningTimer(null);
-    }, 4000);
-    
-    setDuplicateWarningTimer(newTimer);
-  };
+    initializeData();
+  }, [id]); // Only depend on id
+
+  // 🔒 SELECTIVE CLEANUP: Only clear on true unmount, not navigation
+  useEffect(() => {
+    return () => {
+      // ℹ️ Don't clear pending items on every navigation - let them persist for pickup
+      console.log('🔒 COMPONENT UNMOUNT: Keeping pending items for next navigation');
+    };
+  }, []);
 
   // 🧠 SENIOR REACT: Multi-level duplicate detection system (EXACT CLONE from ManufacturedProducts)
   const checkForDuplicates = (existingItems, newItems) => {
@@ -146,389 +370,318 @@ function AddTenderContent() {
     const duplicates = [];
     const uniqueItems = [];
     
-    // Create comprehensive comparison maps for existing items
-    const existingIdsMap = new Map();
-    const existingNamesMap = new Map();
+    // Create Maps for efficient lookups with multiple ID fields and case-insensitive names
+    const existingByInternalId = new Map();
+    const existingByMaterialId = new Map();
+    const existingByName = new Map();
     
     existingItems.forEach((item, index) => {
-      // ID-based mapping (multiple ID strategies)
-      const itemId = item.materialInternalId || item.internalId || item.id;
-      if (itemId) {
-        existingIdsMap.set(itemId, { item, index });
-      }
+      // Handle multiple ID fields
+      const internalId = item.internalId || item.materialInternalId;
+      const materialId = item.materialInternalId || item.internalId;
+      const itemName = (item.materialName || item.name || '').toLowerCase().trim();
       
-      // Name-based mapping (case-insensitive) - Include title for manufactured products
-      const itemName = (item.materialName || item.name || item.title || '').trim();
-      if (itemName) {
-        const normalizedName = itemName.toLowerCase();
-        existingNamesMap.set(normalizedName, { item, index });
-      }
+      if (internalId) existingByInternalId.set(internalId, { item, index });
+      if (materialId) existingByMaterialId.set(materialId, { item, index });
+      if (itemName) existingByName.set(itemName, { item, index });
     });
-
-    console.log('🧠 DUPLICATE PREVENTION MAPS:', {
-      existingIdsCount: existingIdsMap.size,
-      existingNamesCount: existingNamesMap.size
-    });
-
-    // Check each new item for duplicates
+    
     newItems.forEach(newItem => {
-      const newItemId = newItem.materialInternalId || newItem.internalId || newItem.id;
-      const newItemName = (newItem.materialName || newItem.name || newItem.title || '').trim();
-      const normalizedNewName = newItemName.toLowerCase();
+      const newInternalId = newItem.internalId || newItem.materialInternalId;
+      const newMaterialId = newItem.materialInternalId || newItem.internalId;
+      const newItemName = (newItem.materialName || newItem.name || '').toLowerCase().trim();
       
       let isDuplicate = false;
-      let duplicateType = '';
-      let duplicateMatch = null;
-
-      // 1. Check for ID-based duplicates (exact match)
-      if (newItemId && existingIdsMap.has(newItemId)) {
+      let duplicateInfo = null;
+      
+      // Check for ID-based duplicates (highest priority)
+      if (newInternalId && existingByInternalId.has(newInternalId)) {
         isDuplicate = true;
-        duplicateType = 'ID';
-        duplicateMatch = existingIdsMap.get(newItemId).item;
-        console.log(`🚨 ID DUPLICATE: ${newItemName} matches existing ID: ${newItemId}`);
+        duplicateInfo = {
+          type: 'ID',
+          displayName: newItem.materialName || newItem.name,
+          matchedItem: existingByInternalId.get(newInternalId).item
+        };
+      } else if (newMaterialId && existingByMaterialId.has(newMaterialId)) {
+        isDuplicate = true;
+        duplicateInfo = {
+          type: 'ID',
+          displayName: newItem.materialName || newItem.name,
+          matchedItem: existingByMaterialId.get(newMaterialId).item
+        };
+      }
+      // Check for name-based duplicates (lower priority)
+      else if (newItemName && existingByName.has(newItemName)) {
+        isDuplicate = true;
+        duplicateInfo = {
+          type: 'NAME',
+          displayName: newItem.materialName || newItem.name,
+          matchedItem: existingByName.get(newItemName).item
+        };
       }
       
-      // 2. Check for name-based duplicates (case-insensitive)
-      if (!isDuplicate && newItemName && existingNamesMap.has(normalizedNewName)) {
-        isDuplicate = true;
-        duplicateType = 'NAME';
-        duplicateMatch = existingNamesMap.get(normalizedNewName).item;
-        console.log(`🚨 NAME DUPLICATE: "${newItemName}" matches existing name (case-insensitive)`);
-      }
-
       if (isDuplicate) {
-        duplicates.push({
-          newItem,
-          existingItem: duplicateMatch,
-          type: duplicateType,
-          displayName: newItemName || 'بند غير محدد'
+        duplicates.push(duplicateInfo);
+        console.log('⚠️ DUPLICATE DETECTED:', {
+          newItem: newItem.materialName || newItem.name,
+          type: duplicateInfo.type,
+          matchedWith: duplicateInfo.matchedItem.materialName || duplicateInfo.matchedItem.name
         });
       } else {
         uniqueItems.push(newItem);
-        console.log(`✅ UNIQUE ITEM: ${newItemName} - Adding to list`);
-        
-        // Update maps with new item for subsequent checks
-        if (newItemId) {
-          existingIdsMap.set(newItemId, { item: newItem, index: -1 });
-        }
-        if (newItemName) {
-          existingNamesMap.set(normalizedNewName, { item: newItem, index: -1 });
-        }
+        console.log('✅ UNIQUE ITEM:', newItem.materialName || newItem.name);
       }
     });
-
-    console.log('🧠 DUPLICATE ANALYSIS COMPLETE:', {
+    
+    console.log('🛡️ DUPLICATE PREVENTION SUMMARY:', {
       totalNewItems: newItems.length,
-      uniqueItemsFound: uniqueItems.length,
       duplicatesFound: duplicates.length,
-      duplicateDetails: duplicates.map(d => ({ name: d.displayName, type: d.type }))
+      uniqueItemsToAdd: uniqueItems.length
     });
-
+    
     return { duplicates, uniqueItems };
   };
 
-  // 🧠 SENIOR REACT: Cleanup timer on unmount to prevent memory leaks (EXACT CLONE from ManufacturedProducts)
-  useEffect(() => {
-    return () => {
-      if (duplicateWarningTimer) {
-        clearTimeout(duplicateWarningTimer);
-      }
-    };
-  }, [duplicateWarningTimer]);
-
-  // 🧠 SENIOR REACT: Standalone function for checking sessionStorage (EXACT ManufacturedProducts pattern)
-  const checkPendingItems = async () => {
-    console.log('🛡️ SENIOR REACT: Checking for pending tender items using EXACT ManufacturedProducts approach');
-    const pendingItems = sessionStorage.getItem('pendingTenderItems');
-    if (pendingItems) {
-      try {
-        const items = JSON.parse(pendingItems);
-        console.log('Found pending items:', items);
-        if (Array.isArray(items) && items.length > 0) {
+  // 🧠 SENIOR REACT: Debounced load with protection against multiple calls
+  const loadPendingItemsRef = useRef(false);
+  const componentMountTime = useRef(Date.now());
+  
+  const loadPendingItems = async () => {
+    // 🛡️ CRITICAL FIX: Prevent multiple simultaneous calls
+    if (loadPendingItemsRef.current) {
+      console.log('🚫 loadPendingItems already running, skipping...');
+      return;
+    }
+    
+    // 🔧 FIX: Don't load pending items in edit mode if we already have saved items
+    if (id && tenderItems.length > 0) {
+      console.log('🚫 EDIT MODE: Skipping pending items load - already have saved tender items');
+      return;
+    }
+    
+    try {
+      loadPendingItemsRef.current = true;
+      console.log('🔍 Loading pending tender items from Firestore...');
+      
+      const pendingItems = await FirestorePendingDataService.getPendingTenderItems();
+      if (pendingItems) {
+        const parsedItems = Array.isArray(pendingItems) ? pendingItems : JSON.parse(pendingItems);
+        console.log('📦 Found pending tender items:', parsedItems.length, 'items');
+        console.log('📋 STORAGE CONTENT:', parsedItems.map(item => ({
+          id: item.internalId || item.materialInternalId,
+          name: item.materialName || item.name
+        })));
+        
+        // ✅ ID-based duplicate prevention using selectedItemIds
+        setTenderItems(prevItems => {
+          console.log('✅ PROCESSING NEW ITEMS WITH ID-BASED DUPLICATE PREVENTION');
           
-          // Clear sessionStorage IMMEDIATELY to prevent race conditions and double processing
-          sessionStorage.removeItem('pendingTenderItems');
-          console.log('🧹 Cleared pendingTenderItems IMMEDIATELY to prevent double processing');
-          
-          // Refresh pricing for pending items first
-          const refreshedItems = await TenderItemsService.refreshTenderItemsPricing(items);
-          console.log('Refreshed pricing for pending items:', refreshedItems);
-          
-          // 🧠 SENIOR REACT: Enhanced duplicate prevention with case-insensitive logic (EXACT CLONE from ManufacturedProducts)
-          let duplicatesResult = null;
-          
-          setTenderItems(prev => {
-            console.log('🛡️ SENIOR REACT: Starting advanced duplicate prevention system...');
+          // Filter out items that are already selected by ID
+          const newItems = parsedItems.filter(item => {
+            const itemId = item.internalId || item.materialInternalId || item.id;
+            const isDuplicate = itemId && selectedItemIds.includes(itemId);
             
-            const { duplicates, uniqueItems } = checkForDuplicates(prev, refreshedItems);
-            duplicatesResult = { duplicates, uniqueItems }; // Store for use outside setTenderItems
-            
-            // Handle duplicates with advanced warning system (EXACT CLONE from ManufacturedProducts)
-            if (duplicates.length > 0) {
-              const duplicateMessages = duplicates.map(dup => {
-                const matchType = dup.type === 'ID' ? 'معرف مطابق' : 'اسم مطابق';
-                return `⚠️ "${dup.displayName}" (${matchType})`;
-              });
-              
-              const warningMessage = `البنود التالية موجودة مسبقاً في المناقصة:\n\n${duplicateMessages.join('\n')}`;
-              
-              // Set advanced warning with auto-clear (EXACT CLONE from ManufacturedProducts)
-              setDuplicateWarning(warningMessage);
-              clearDuplicateWarningAfterDelay();
-              
-              // Also show error alert for immediate feedback (EXACT CLONE from ManufacturedProducts)
-              showError(
-                `تم العثور على ${duplicates.length} بند مكرر. لن يتم إضافة البنود المكررة.`,
-                'بنود مكررة'
-              );
-              
-              console.log('🚨 DUPLICATES BLOCKED:', {
-                count: duplicates.length,
-                names: duplicates.map(d => d.displayName)
+            if (isDuplicate) {
+              console.log('⚠️ DUPLICATE DETECTED (ID-based):', {
+                itemName: item.materialName || item.name,
+                itemId: itemId,
+                action: 'FILTERED_OUT'
               });
             }
             
-            const updatedItems = [...prev, ...uniqueItems];
-            
-            console.log('🛡️ SENIOR REACT DUPLICATE PREVENTION RESULT:', {
-              existingCount: prev.length,
-              newUniqueItems: uniqueItems.length,
-              duplicatesBlocked: duplicates.length,
-              finalCount: updatedItems.length,
-              preventionSuccess: duplicates.length === 0 ? 'ALL_UNIQUE' : 'DUPLICATES_FILTERED'
-            });
-            
-            // INSTANT: Calculate and update estimated value immediately
-            const immediateTotal = updatedItems.reduce((total, item) => {
-              return total + (item.totalPrice || 0);
-            }, 0);
-            if (immediateTotal > 0) {
-              setTimeout(() => {
-                setFormData(prev => ({ ...prev, estimatedValue: immediateTotal.toString() }));
-                console.log('💰 INSTANT: Updated estimated value from items:', immediateTotal);
-              }, 0);
-            }
-            
-            return updatedItems;
+            return !isDuplicate;
           });
           
-          // Items added - show success message only for unique items (EXACT CLONE from ManufacturedProducts)
-          if (duplicatesResult && duplicatesResult.uniqueItems.length > 0) {
-            showSuccess(`تم إضافة ${duplicatesResult.uniqueItems.length} عنصر للمناقصة`, 'تمت الإضافة');
+          console.log('✅ DUPLICATE PREVENTION RESULTS:', {
+            totalNewItems: parsedItems.length,
+            duplicatesFiltered: parsedItems.length - newItems.length,
+            itemsToAdd: newItems.length,
+            existingItems: prevItems.length
+          });
+          
+          if (newItems.length === 0) {
+            console.log('📝 No new items to add after duplicate filtering');
+            return prevItems;
+          }
+          
+          // Add new items to existing items
+          const allItems = [...prevItems, ...newItems];
+          
+          // ✅ Update selectedItemIds with new item IDs
+          if (newItems.length > 0) {
+            const newItemIds = newItems.map(item => 
+              item.internalId || item.materialInternalId || item.id
+            ).filter(id => id);
+            
+            setSelectedItemIds(prev => {
+              const updatedIds = [...prev, ...newItemIds];
+              console.log('✅ Updated selectedItemIds:', updatedIds);
+              return updatedIds;
+            });
+          }
+          
+          // Update estimated value from all items
+          const totalFromItems = allItems.reduce((total, item) => {
+            return total + ((item.unitPrice || 0) * (item.quantity || 1));
+          }, 0);
+          
+          if (totalFromItems > 0) {
+            setFormData(prev => ({ ...prev, estimatedValue: totalFromItems.toString() }));
+          }
+          
+          console.log('🛡️ SENIOR REACT STORAGE REPLACEMENT COMPLETED:', {
+            prevItemsCount: prevItems.length,
+            storageItemsCount: parsedItems.length,
+            finalCount: allItems.length,
+            replacementSuccess: 'COMPLETE_REPLACEMENT_FROM_STORAGE'
+          });
+          
+          return allItems;
+        });
+        
+        // 🔧 FORCE RE-RENDER FIX: Ensure React updates the UI by triggering a state change
+        setTimeout(() => {
+          setTenderItems(currentItems => {
+            console.log('🔄 FORCE RE-RENDER: Ensuring UI reflects current items count:', currentItems.length);
+            return [...currentItems]; // Create new array reference to force re-render
+          });
+        }, 100);
+        
+        // 🔧 FIXED: Don't clear items immediately - keep them until tender is saved
+        // Items will be cleared when tender is submitted or cancelled
+        console.log('✅ Items loaded and ready - keeping in storage until tender is saved');
+      } else {
+        console.log('📦 No pending tender items found in Firestore');
+        
+        // Also check if there are existing items in Firestore that aren't loaded yet
+        const firestoreItems = await FirestorePendingDataService.getPendingData(`tenderItems_${id || 'new'}`);
+        if (firestoreItems && tenderItems.length === 0) {
+          try {
+            if (Array.isArray(firestoreItems) && firestoreItems.length > 0) {
+              console.log('📦 Loading existing tender items from Firestore:', firestoreItems.length);
+              setTenderItems(firestoreItems);
+            }
+          } catch (firestoreError) {
+            console.error('Error loading Firestore items:', firestoreError);
           }
         }
-      } catch (error) {
-        console.error('Error parsing or refreshing pending items:', error);
-        sessionStorage.removeItem('pendingTenderItems');
       }
-    } else {
-      console.log('No pending items found in sessionStorage');
+    } catch (error) {
+      console.error('Error loading pending items:', error);
+    } finally {
+      // 🛡️ CRITICAL FIX: Always release the lock with longer delay to prevent auto-save race
+      setTimeout(() => {
+        loadPendingItemsRef.current = false;
+        console.log('🔓 Released loadPendingItems lock after 3-second cooldown');
+      }, 3000); // 3 second cooldown to prevent auto-save race condition
     }
   };
 
-  // Load tender data when editing - Simplified without dependencies
+  // 🚀 SENIOR REACT: Debounced event listeners with protection
+  // 🧠 SENIOR REACT: SIMPLIFIED EVENT HANDLING - No competing initialization
   useEffect(() => {
-    if (!id) return;
-    
-    const loadData = async () => {
-      try {
-        setLoadingData(true);
-        console.log('Loading tender data for ID:', id);
-        const tenders = await TenderService.getAllTenders();
-        const tender = tenders.find(t => t.id === id);
-        
-        if (tender) {
-          const deadlineValue = tender.submissionDeadline ? 
-            formatDateForInput(tender.submissionDeadline) : '';
-            
-          // SENIOR REACT: Use stored estimated value directly from database
-          const databaseEstimatedValue = tender.estimatedValue || 0;
+    const handleCustomEvent = () => {
+      console.log('🔍 Custom event received - reloading items...');
+      loadPendingItems();
+    };
 
-          // SENIOR REACT: Smart form data loading - preserve user input if exists
-          setFormData(currentFormData => {
-            // If user has already entered data, preserve it unless it's empty/default
-            const shouldPreserveUserData = currentFormData.title || currentFormData.description || currentFormData.entity;
-            
-            if (shouldPreserveUserData) {
-              console.log('📋 Preserving user form data, only updating estimated value');
-              return {
-                ...currentFormData,
-                estimatedValue: databaseEstimatedValue.toString() // Use database value
-              };
-            } else {
-              console.log('📋 Loading fresh form data from Firebase');
-              return {
-                title: tender.title || '',
-                referenceNumber: tender.referenceNumber || '',
-                entity: tender.entity || '',
-                description: tender.description || '',
-                submissionDeadline: deadlineValue,
-                estimatedValue: databaseEstimatedValue.toString(),
-                category: tender.category || '',
-                location: tender.location || '',
-                contactPerson: tender.contactPerson || '',
-                contactPhone: tender.contactPhone || '',
-                contactEmail: tender.contactEmail || ''
-              };
-            }
-          });
-          
-          // CRITICAL: Load documents from Firebase database (not localStorage)
-          try {
-            console.log('💾 Loading documents from Firebase database for tender:', id);
-            if (tender.documents && Array.isArray(tender.documents)) {
-              const validDocuments = tender.documents.filter(doc => 
-                doc && typeof doc === 'object' && doc.fileName && doc.fileURL
-              );
-              setDocuments(validDocuments);
-              console.log('✅ Loaded tender documents from Firebase database:', validDocuments.length);
-              
-              // Backup to localStorage
-              localStorage.setItem(`tenderDocuments_${id}`, JSON.stringify(validDocuments));
-            } else {
-              console.log('⚠️ No documents found in Firebase, checking localStorage backup');
-              // Fallback to localStorage only if Firebase has no documents
-              const savedDocs = localStorage.getItem(`tenderDocuments_${id}`);
-              if (savedDocs) {
-                const validDocuments = JSON.parse(savedDocs).filter(doc => 
-                  doc && typeof doc === 'object' && doc.fileName && doc.fileURL
-                );
-                setDocuments(validDocuments);
-                console.log('📦 Loaded tender documents from localStorage backup:', validDocuments.length);
-              } else {
-                setDocuments([]);
-              }
-            }
-          } catch (docError) {
-            console.error('Error loading documents:', docError);
-            setDocuments([]);
-          }
-          
-          // CRITICAL: Load tender items using the method we solved today
-          try {
-            console.log('💾 Loading tender items from Firebase database for tender:', id);
-            if (tender.items && Array.isArray(tender.items) && tender.items.length > 0) {
-              const validItems = tender.items.filter(item => 
-                item && typeof item === 'object' && item.materialName
-              );
-              setTenderItems(validItems);
-              console.log('✅ Loaded tender items from Firebase database:', validItems.length);
-              
-              // CONTROLLED: Update estimated value only when loading from database
-              setTimeout(() => {
-                const totalFromFirebaseItems = validItems.reduce((total, item) => {
-                  return total + (item.totalPrice || 0);
-                }, 0);
-                if (totalFromFirebaseItems > 0) {
-                  setFormData(prev => ({ ...prev, estimatedValue: totalFromFirebaseItems.toString() }));
-                  console.log('💰 CONTROLLED: Updated estimated value from Firebase items:', totalFromFirebaseItems);
-                }
-              }, 100);
-              
-              // Backup to localStorage
-              localStorage.setItem(`tenderItems_${id}`, JSON.stringify(validItems));
-            } else {
-              console.log('⚠️ No items in Firebase, checking sessionStorage pendingTenderItems (from material pages)');
-              // CRITICAL: Check sessionStorage for pendingTenderItems from material selection pages
-              const pendingItems = sessionStorage.getItem('pendingTenderItems');
-              if (pendingItems) {
-                try {
-                  const items = JSON.parse(pendingItems);
-                  if (Array.isArray(items) && items.length > 0) {
-                    console.log('🔄 Found pending items from material pages, refreshing pricing:', items.length);
-                    const refreshedItems = await TenderItemsService.refreshTenderItemsPricing(items);
-                    setTenderItems(refreshedItems);
-                    console.log('✅ Loaded and refreshed pending tender items:', refreshedItems.length);
-                    
-                    // CONTROLLED: Update estimated value only when loading from sessionStorage
-                    setTimeout(() => {
-                      const totalFromPendingItems = refreshedItems.reduce((total, item) => {
-                        return total + ((item.unitPrice || 0) * (item.quantity || 1));
-                      }, 0);
-                      if (totalFromPendingItems > 0) {
-                        setFormData(prev => ({ ...prev, estimatedValue: totalFromPendingItems.toString() }));
-                        console.log('💰 CONTROLLED: Updated estimated value from sessionStorage items:', totalFromPendingItems);
-                      }
-                    }, 100);
-                  }
-                } catch (sessionError) {
-                  console.error('Error parsing pending items:', sessionError);
-                }
-              } else {
-                // Final fallback to localStorage backup
-                const savedItems = localStorage.getItem(`tenderItems_${id}`);
-                if (savedItems) {
-                  const validItems = JSON.parse(savedItems).filter(item => 
-                    item && typeof item === 'object' && item.materialName
-                  );
-                  setTenderItems(validItems);
-                  console.log('📦 Loaded tender items from localStorage backup:', validItems.length);
-                  
-                  // INSTANT: Calculate and update estimated value from localStorage backup
-                  const totalFromBackupItems = validItems.reduce((total, item) => {
-                    return total + ((item.unitPrice || 0) * (item.quantity || 1));
-                  }, 0);
-                  if (totalFromBackupItems > 0) {
-                    setFormData(prev => ({ ...prev, estimatedValue: totalFromBackupItems.toString() }));
-                    console.log('💰 INSTANT: Updated estimated value from localStorage backup:', totalFromBackupItems);
-                  }
-                } else {
-                  setTenderItems([]);
-                }
-              }
-            }
-          } catch (itemsError) {
-            console.error('Error loading tender items:', itemsError);
-            setTenderItems([]);
-          }
-          
-          console.log('Tender data loaded successfully');
-        } else {
-          console.error('Tender not found with ID:', id);
-          // Use simple alert instead of showError to avoid dependency issues
-          setTimeout(() => {
-            showError('المناقصة غير موجودة', 'خطأ في التحميل');
-          }, 100);
+    const handleTenderItemRestored = (event) => {
+      console.log('🔄 TRASH RESTORE: Tender item restored from trash, reloading items...');
+      const { tenderId, restoredItem } = event.detail || {};
+      
+      // Check if this restoration is for our tender
+      if (tenderId === (id || 'new')) {
+        console.log('✅ RESTORE FOR THIS TENDER: Reloading items for tender', tenderId);
+        loadPendingItems();
+      } else {
+        console.log('ℹ️ RESTORE FOR OTHER TENDER: Ignoring restoration for tender', tenderId);
+      }
+    };
+
+    // 🎯 Listen to custom events for item addition and trash restoration
+    window.addEventListener('tenderItemsAdded', handleCustomEvent);
+    window.addEventListener('tenderItemRestored', handleTenderItemRestored);
+    
+    // 🚨 REMOVED: All automatic loading that was causing race conditions
+    // - window focus events
+    // - initial timeout checks
+    // - visibility change events
+    
+    // 🚨 REMOVED: Aggressive interval that was causing continuous adding
+    // const intervalId = setInterval(() => {
+    //   checkPendingItems();
+    // }, 2000);
+
+    return () => {
+      // 🧹 CLEANUP: Remove all the event listeners we added
+      window.removeEventListener('tenderItemsAdded', handleCustomEvent);
+      window.removeEventListener('tenderItemRestored', handleTenderItemRestored);
+    };
+  }, []);
+
+  // 🚨 REMOVED DUPLICATE LISTENERS: This was causing the hundreds of duplicated items!
+  // The event listeners are already handled in the previous useEffect with debounce protection
+
+  // 🛡️ SENIOR REACT: Smart auto-save that doesn't interfere with loading new items or deletions
+  const isDeletingRef = useRef(false);
+  
+  useEffect(() => {
+    const autoSaveTenderItems = async () => {
+      const timeSinceMount = Date.now() - componentMountTime.current;
+      const isRecentMount = timeSinceMount < 5000; // 5 second grace period
+      const isDeletingOperation = isDeletingRef.current;
+      
+      console.log('🤖 AUTO-SAVE TRIGGERED:', {
+        itemsCount: tenderItems.length,
+        isLoadingLocked: loadPendingItemsRef.current,
+        timeSinceMount,
+        isRecentMount,
+        isDeletingOperation,
+        willSave: tenderItems.length > 0 && !loadPendingItemsRef.current && !isRecentMount && !isDeletingOperation
+      });
+      
+      if (tenderItems.length > 0 && !loadPendingItemsRef.current && !isRecentMount && !isDeletingOperation) {
+        try {
+          await FirestorePendingDataService.setPendingTenderItems(tenderItems);
+          console.log('✅ SMART AUTO-SAVE: Saved tender items to Firestore:', tenderItems.length, 'items');
+          console.log('📋 AUTO-SAVE CONTENT:', tenderItems.map(item => ({
+            id: item.internalId || item.materialInternalId,
+            name: item.materialName || item.name
+          })));
+        } catch (error) {
+          console.error('Error saving tender items:', error);
         }
-      } catch (error) {
-        console.error('Error loading tender:', error);
-        // Use simple alert instead of showError to avoid dependency issues
-        setTimeout(() => {
-          showError('فشل في تحميل بيانات المناقصة: ' + error.message, 'خطأ في التحميل');
-        }, 100);
-      } finally {
-        setLoadingData(false);
-        
-        // 🧠 SENIOR REACT: Call checkPendingItems AFTER loadData completes (EXACT ManufacturedProducts pattern)
-        setTimeout(() => {
-          checkPendingItems();
-        }, 100);
+      } else if (loadPendingItemsRef.current) {
+        console.log('🚫 SMART AUTO-SAVE: Skipping save during item loading to prevent race condition');
+      } else if (isRecentMount) {
+        console.log('🚫 SMART AUTO-SAVE: Skipping save - component recently mounted, allowing time for item loading');
+      } else if (isDeletingOperation) {
+        console.log('🚫 SMART AUTO-SAVE: Skipping save during deletion operation to prevent restoring deleted items');
+      } else if (tenderItems.length === 0) {
+        console.log('🚫 SMART AUTO-SAVE: Skipping save for empty items array');
       }
     };
     
-    loadData();
-  }, [id]); // Only depend on id
+    // 🛡️ CRITICAL FIX: Longer timeout to prevent race condition with loading
+    const timeoutId = setTimeout(autoSaveTenderItems, 2000);
+    return () => clearTimeout(timeoutId);
+  }, [tenderItems]);
 
-
-  // Save tender items to localStorage whenever they change (NO automatic estimated value update)
+  // Auto-save documents to session storage
   useEffect(() => {
-    try {
-      localStorage.setItem(`tenderItems_${id || 'new'}`, JSON.stringify(tenderItems));
-      console.log('Saved tender items to localStorage:', tenderItems.length, 'items');
-      // SENIOR REACT: Do NOT automatically update estimated value - only update on specific triggers
-    } catch (error) {
-      console.error('Error saving tender items:', error);
-    }
-  }, [tenderItems, id]);
-
-  // Save documents to localStorage whenever they change
-  useEffect(() => {
-    try {
-      localStorage.setItem(`tenderDocuments_${id || 'new'}`, JSON.stringify(documents));
-      console.log('Saved tender documents to localStorage:', documents.length, 'documents');
-    } catch (error) {
-      console.error('Error saving tender documents:', error);
-    }
+    const autoSaveDocuments = async () => {
+      if (documents.length > 0) {
+        try {
+          await FirestorePendingDataService.setPendingData(`tenderDocuments_${id || 'new'}`, documents);
+          console.log('Saved tender documents to Firestore:', documents.length, 'documents');
+        } catch (error) {
+          console.error('Error saving tender documents:', error);
+        }
+      }
+    };
+    
+    const timeoutId = setTimeout(autoSaveDocuments, 1000);
+    return () => clearTimeout(timeoutId);
   }, [documents, id]);
 
   // Listen for document restoration from trash
@@ -556,7 +709,7 @@ function AddTenderContent() {
             .sort((a, b) => new Date(b.restoredAt || 0) - new Date(a.restoredAt || 0))[0];
             
           if (recentlyRestored) {
-            showSuccess(`تم استعادة الملف: ${recentlyRestored.fileName}`, 'تمت الاستعادة');
+            // Document restored - no automatic message needed
             
             // Log activity
             const currentUser = getCurrentUser();
@@ -582,7 +735,7 @@ function AddTenderContent() {
         console.log('📄 Updating documents from custom event:', allDocuments.length);
         setDocuments([...allDocuments]); // Force new array reference
         
-        showSuccess(`تم استعادة الملف: ${restoredDocument.fileName}`, 'تمت الاستعادة');
+        // Document restored from trash - no automatic message needed
         
         // Log activity
         const currentUser = getCurrentUser();
@@ -632,26 +785,44 @@ function AddTenderContent() {
     return currentTotal;
   }, [tenderItems]);
 
-  // SENIOR REACT: Persist form data across navigation
+  // Auto-save form data to session storage
   useEffect(() => {
-    try {
-      sessionStorage.setItem(`tenderFormData_${id || 'new'}`, JSON.stringify(formData));
-      console.log('💾 Saved tender form data for navigation persistence:', formData.title || 'New Tender');
-    } catch (error) {
-      console.error('Error saving form data:', error);
-    }
+    const autoSaveFormData = async () => {
+      if (Object.keys(formData).some(key => formData[key])) {
+        try {
+          await FirestorePendingDataService.setPendingData(`tenderFormData_${id || 'new'}`, formData);
+          console.log('💾 Saved tender form data for navigation persistence:', formData.title || 'New Tender');
+        } catch (error) {
+          console.error('Error saving form data:', error);
+        }
+      }
+    };
+    
+    const timeoutId = setTimeout(autoSaveFormData, 1000);
+    return () => clearTimeout(timeoutId);
   }, [formData, id]);
 
   const handleToggle = () => {
     setSidebarCollapsed(!sidebarCollapsed);
   };
 
-  const handleChange = (e) => {
+  const handleChange = async (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData(prev => ({
-      ...prev,
+    const newFormData = {
+      ...formData,
       [name]: type === 'checkbox' ? checked : value
-    }));
+    };
+    
+    setFormData(newFormData);
+    
+    // Save form data to FirestorePendingDataService for persistence during navigation
+    try {
+      const formKey = id ? `tenderFormData_${id}` : 'tenderFormData_new';
+      await FirestorePendingDataService.setPendingData(formKey, newFormData);
+      console.log(`💾 Form data saved for field: ${name}`);
+    } catch (error) {
+      console.error('Error saving form data:', error);
+    }
     
     if (errors[name]) {
       setErrors(prev => ({
@@ -710,49 +881,34 @@ function AddTenderContent() {
         itemsCount: (tenderData.items || []).length
       });
       
+      let result;
       if (isEditing) {
-        await TenderService.updateTender(id, tenderData);
+        result = await tenderServiceNew.updateTender(id, tenderData);
         
         const currentUser = getCurrentUser();
-        logActivity('task', `${currentUser.name} عدل مناقصة`, `تم تعديل المناقصة: ${tenderData.title}`);
+        await logActivity('task', `${currentUser.name} عدل مناقصة`, `تم تعديل المناقصة: ${tenderData.title}`);
+        
+        // Clear pending data after successful update
+        await FirestorePendingDataService.clearPendingData(`tenderFormData_${id}`);
+        await FirestorePendingDataService.clearPendingData(`tenderDocuments_${id}`);
+        await FirestorePendingDataService.clearPendingTenderItems();
         
         showSuccess('تم تحديث المناقصة بنجاح', 'تم التحديث');
-        
-        // Keep tender items in localStorage for edit mode - don't clear them
-        // localStorage.removeItem(`tenderItems_${id}`);
       } else {
-        const newTenderId = await TenderService.createTender(tenderData);
+        result = await tenderServiceNew.createTender(tenderData);
         
         const currentUser = getCurrentUser();
-        logActivity('task', `${currentUser.name} أضاف مناقصة`, `تم إضافة المناقصة: ${tenderData.title}`);
+        await logActivity('task', `${currentUser.name} أضاف مناقصة`, `تم إضافة المناقصة: ${tenderData.title}`);
         
-        // Transfer tender items from 'new' to the actual tender ID
-        if (newTenderId && tenderItems.length > 0) {
-          try {
-            localStorage.setItem(`tenderItems_${newTenderId}`, JSON.stringify(tenderItems));
-            console.log('Transferred tender items to new ID:', newTenderId);
-          } catch (error) {
-            console.error('Error transferring tender items:', error);
-          }
-        }
+        // Clear pending data after successful creation
+        await FirestorePendingDataService.clearPendingData('tenderFormData_new');
+        await FirestorePendingDataService.clearPendingData('tenderDocuments_new');
+        await FirestorePendingDataService.clearPendingTenderItems();
         
-        // Transfer documents from 'new' to the actual tender ID
-        if (newTenderId && documents.length > 0) {
-          try {
-            localStorage.setItem(`tenderDocuments_${newTenderId}`, JSON.stringify(documents));
-            console.log('Transferred tender documents to new ID:', newTenderId);
-          } catch (error) {
-            console.error('Error transferring tender documents:', error);
-          }
-        }
-        
-        // Clear the 'new' tender documents after transfer
-        localStorage.removeItem('tenderDocuments_new');
+        // Clear success message flag for next tender
+        localStorage.removeItem('tender_success_shown_new');
         
         showSuccess('تم إضافة المناقصة بنجاح', 'تمت الإضافة');
-        
-        // Clear the 'new' tender items after transfer
-        localStorage.removeItem('tenderItems_new');
       }
       
       setTimeout(() => {
@@ -767,7 +923,24 @@ function AddTenderContent() {
     }
   };
 
-  const handleCancel = () => {
+  const handleCancel = async () => {
+    try {
+      // Clear all pending data when canceling tender creation
+      if (!isEditing) {
+        console.log('🧹 CANCEL: Clearing all pending data for cancelled new tender');
+        await FirestorePendingDataService.clearPendingData('tenderFormData_new');
+        await FirestorePendingDataService.clearPendingData('tenderDocuments_new'); 
+        await FirestorePendingDataService.clearPendingTenderItems();
+        
+        // Clear success message flag for next tender
+        localStorage.removeItem('tender_success_shown_new');
+        
+        console.log('✅ CANCEL: All pending data cleared successfully');
+      }
+    } catch (error) {
+      console.error('Error clearing pending data on cancel:', error);
+    }
+    
     navigate('/tenders/list');
   };
 
@@ -816,10 +989,83 @@ function AddTenderContent() {
     }
   };
 
+  // 🗑️ SENIOR REACT: Delete tender item functionality (EXACT CLONE from CustomersList)
+  const handleItemDeleteClick = (item, index) => {
+    const itemName = item.materialName || item.name || 'بند غير معروف';
+    showConfirm(
+      `هل أنت متأكد من حذف هذا البند؟\n\n${itemName}`,
+      () => handleItemDeleteConfirm(item, index),
+      'تأكيد حذف البند'
+    );
+  };
 
-  // Remove tender item from list
-  const removeTenderItem = (indexToRemove) => {
-    setTenderItems(prevItems => prevItems.filter((_, index) => index !== indexToRemove));
+  const handleItemDeleteConfirm = async (item, index) => {
+    try {
+      setDeleting(true);
+      // 🛡️ CRITICAL FIX: Set deletion flag to prevent auto-save from restoring deleted items
+      isDeletingRef.current = true;
+      
+      console.log('🗑️ Starting deletion process:', {
+        itemName: item.materialName || item.name,
+        itemId: item.internalId || item.materialInternalId,
+        isDeletingFlag: isDeletingRef.current
+      });
+      
+      // Add tender context for proper restoration
+      const itemWithContext = {
+        ...item,
+        tenderContext: {
+          tenderId: id || 'new',
+          tenderTitle: formData.title || 'مناقصة جديدة',
+          addedAt: new Date().toISOString()
+        }
+      };
+      
+      // Move to trash instead of permanent deletion
+      await SimpleTrashService.moveToTrash(itemWithContext, 'tenderItems');
+      console.log('✅ Successfully moved to trash');
+      
+      // Remove from current list
+      setTenderItems(prevItems => {
+        const newItems = prevItems.filter((_, idx) => idx !== index);
+        
+        // Remove item ID from selectedItemIds for duplicate prevention
+        const itemId = item?.internalId || item?.materialInternalId || item?.id;
+        if (itemId) {
+          setSelectedItemIds(prev => prev.filter(id => id !== itemId));
+        }
+        
+        // Recalculate estimated value
+        const currentTotal = newItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
+        setFormData(prev => ({
+          ...prev,
+          estimatedValue: currentTotal.toString()
+        }));
+        
+        console.log('✅ Item removed from list, new count:', newItems.length);
+        return newItems;
+      });
+      
+      // 🛡️ CRITICAL: Clear deletion flag after a delay to allow auto-save to be skipped
+      setTimeout(() => {
+        isDeletingRef.current = false;
+        console.log('✅ Deletion flag cleared, auto-save can resume');
+      }, 5000); // 5 second delay to ensure auto-save doesn't restore the item
+      
+      // Log activity
+      const currentUser = getCurrentUser();
+      const itemName = item.materialName || item.name || 'بند غير معروف';
+      logActivity('task', `${currentUser.name} حذف بند مناقصة`, `تم حذف البند: ${itemName}`);
+      
+      showSuccess(`تم نقل البند للمهملات: ${itemName}`, 'تم النقل للمهملات');
+    } catch (err) {
+      console.error('❌ Error moving tender item to trash:', err);
+      showError(`فشل في نقل البند للمهملات: ${err.message}`, 'خطأ في النقل');
+      // Clear deletion flag on error too
+      isDeletingRef.current = false;
+    } finally {
+      setDeleting(false);
+    }
   };
 
   // 🧠 SENIOR REACT: Edit tender item functionality (EXACT CLONE from ManufacturedRawMaterials)
@@ -830,11 +1076,12 @@ function AddTenderContent() {
   };
 
   const handleQuantityChange = (itemId, newQuantity) => {
-    const quantity = Math.max(1, parseInt(newQuantity) || 1);
+    // Allow any positive number for manual input, no restrictions
+    const quantity = Math.max(0, parseFloat(newQuantity) || 0);
     setEditingItem(prev => ({
       ...prev,
-      quantity,
-      totalPrice: (prev.unitPrice || 0) * quantity
+      quantity: Number(quantity.toFixed(1)),
+      totalPrice: (prev.unitPrice || 0) * Number(quantity.toFixed(1))
     }));
   };
 
@@ -994,15 +1241,15 @@ function AddTenderContent() {
   };
 
   // Exact customer pattern for document deletion
-  const handleDeleteClick = (document) => {
+  const handleDocumentDeleteClick = (document) => {
     showConfirm(
       `هل أنت متأكد من حذف هذا الملف؟\n\n${document.fileName}`,
-      () => handleDeleteConfirm(document),
+      () => handleDocumentDeleteConfirm(document),
       'تأكيد حذف الملف'
     );
   };
 
-  const handleDeleteConfirm = async (document) => {
+  const handleDocumentDeleteConfirm = async (document) => {
     try {
       setDeleting(true);
       
@@ -1107,7 +1354,7 @@ function AddTenderContent() {
   return (
     <>
       <div className={`page-wrapper ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} dir="rtl">
-        <Header onToggle={handleToggle} />
+          <Header onToggle={handleToggle} />
         
         <div className="main-container" style={{
           paddingRight: sidebarCollapsed ? '72px' : '250px',
@@ -1150,6 +1397,7 @@ function AddTenderContent() {
             </div>
             
             <SidebarButtons />
+            
             
             <div style={{
               height: 'calc(100vh - 200px)',
@@ -1225,30 +1473,6 @@ function AddTenderContent() {
                           </div>
                         )}
 
-                        {/* 🧠 SENIOR REACT: Advanced duplicate warning display with auto-clear (EXACT CLONE from ManufacturedProducts) */}
-                        {duplicateWarning && (
-                          <div 
-                            className="alert alert-warning border-warning shadow-sm"
-                            style={{ 
-                              borderLeft: '4px solid #ffc107',
-                              backgroundColor: '#fff3cd',
-                              color: '#856404',
-                              borderRadius: '8px',
-                              whiteSpace: 'pre-line',
-                              animation: 'fadeIn 0.3s ease-in-out'
-                            }}
-                          >
-                            <div className="d-flex align-items-start">
-                              <i className="bi bi-exclamation-triangle me-2 mt-1" style={{ fontSize: '16px' }}></i>
-                              <div className="flex-grow-1">
-                                <strong>تحذير - بنود مكررة:</strong>
-                                <div style={{ marginTop: '8px', fontSize: '14px' }}>
-                                  {duplicateWarning}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
 
                         <div className="row">
                           <div className="col-md-8 mb-3">
@@ -1335,22 +1559,6 @@ function AddTenderContent() {
                             </div>
                           </div>
 
-                          <div className="col-md-6 mb-3">
-                            <label className="form-label">التصنيف</label>
-                            <select
-                              className="form-select"
-                              name="category"
-                              value={formData.category}
-                              onChange={handleChange}
-                              disabled={loading}
-                            >
-                              <option value="">اختر التصنيف</option>
-                              <option value="goods">سلع</option>
-                              <option value="services">خدمات</option>
-                              <option value="works">أعمال</option>
-                              <option value="consultancy">استشارات</option>
-                            </select>
-                          </div>
 
                           <div className="col-md-6 mb-3">
                             <label className="form-label">المدينة</label>
@@ -1418,37 +1626,36 @@ function AddTenderContent() {
                           </div>
 
                           {/* Tender Items List */}
-                          {console.log('🔍 TENDER ITEMS DEBUG:', { 
-                            itemsCount: tenderItems.length, 
-                            items: tenderItems,
-                            shouldShowList: tenderItems.length > 0 
-                          })}
-                          {tenderItems.length > 0 && (
-                            <div className="col-md-12 mb-4">
-                              <div className="card shadow-sm">
-                                <div className="card-header bg-light">
-                                  <div className="d-flex justify-content-between align-items-center">
-                                    <h6 className="mb-0 fw-bold text-primary">
-                                      <i className="bi bi-list-task me-2"></i>
-                                      بنود المناقصة ({tenderItems.length})
-                                    </h6>
-                                  </div>
+                          {/* Debug logging disabled for performance */}
+                          
+                          {/* 🧠 SENIOR REACT: Always show container for debugging */}
+                          <div className="col-md-12 mb-4">
+                            <div className="card shadow-sm">
+                              <div className="card-header bg-light">
+                                <div className="d-flex justify-content-between align-items-center">
+                                  <h6 className="mb-0 fw-bold text-primary">
+                                    <i className="bi bi-list-task me-2"></i>
+                                    بنود المناقصة ({tenderItems.length}) 
+                                    {tenderItems.length === 0 && <span className="text-danger">- لا توجد بنود</span>}
+                                  </h6>
                                 </div>
-                                <div className="card-body p-0">
-                                  <div className="table-responsive">
-                                    <table className="table table-hover custom-striped mb-0">
-                                      <thead className="table-light">
-                                        <tr>
-                                          <th className="text-center" style={{ width: '60px' }}>#</th>
-                                          <th className="text-center">اسم المادة</th>
-                                          <th className="text-center">الكمية</th>
-                                          <th className="text-center">الوحدة</th>
-                                          <th className="text-center">السعر الإجمالي</th>
-                                          <th className="text-center" style={{ width: '60px' }}>إجراء</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {tenderItems.map((item, index) => {
+                              </div>
+                              
+                              <div className="card-body p-0">
+                                <div className="table-responsive">
+                                  <table className="table table-hover custom-striped mb-0">
+                                    <thead className="table-light">
+                                      <tr>
+                                        <th className="text-center" style={{ width: '60px' }}>#</th>
+                                        <th className="text-center">اسم المادة</th>
+                                        <th className="text-center">الكمية</th>
+                                        <th className="text-center">الوحدة</th>
+                                        <th className="text-center">السعر الإجمالي</th>
+                                        <th className="text-center" style={{ width: '60px' }}>إجراء</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {tenderItems && tenderItems.length > 0 ? tenderItems.map((item, index) => {
                                           // Ensure we're working with proper ID-based structure
                                           // Never show the internal ID as display name
                                           let displayName = item.materialName || item.name || 'مادة غير محددة';
@@ -1648,7 +1855,7 @@ function AddTenderContent() {
                                                 </div>
                                               </td>
                                               <td className="text-center">
-                                                {/* 🧠 SENIOR REACT: Button group with edit and delete (EXACT CLONE from ManufacturedProducts) */}
+                                                {/* SENIOR REACT: Button group with edit and delete (EXACT CLONE from CustomersList) */}
                                                 <div className="btn-group btn-group-sm" style={{ marginLeft: '20px' }}>
                                                   <button
                                                     className="btn btn-outline-primary"
@@ -1658,14 +1865,20 @@ function AddTenderContent() {
                                                       e.stopPropagation();
                                                       handleEditItem(item, index);
                                                     }}
-                                                    title="تعديل الكمية"
+                                                    title="تعديل"
                                                   >
                                                     <i className="bi bi-pencil"></i>
                                                   </button>
                                                   <button
                                                     className="btn btn-outline-danger"
-                                                    onClick={() => removeTenderItem(index)}
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.preventDefault();
+                                                      e.stopPropagation();
+                                                      handleItemDeleteClick(item, index);
+                                                    }}
                                                     title="حذف"
+                                                    disabled={deleting}
                                                   >
                                                     <i className="bi bi-trash"></i>
                                                   </button>
@@ -1673,7 +1886,13 @@ function AddTenderContent() {
                                               </td>
                                             </tr>
                                           );
-                                        })}
+                                        }) : (
+                                          <tr>
+                                            <td colSpan="6" className="text-center py-4 text-muted">
+                                              لا توجد بنود في المناقصة
+                                            </td>
+                                          </tr>
+                                        )}
                                       </tbody>
                                       <tfoot className="table-light">
                                         <tr>
@@ -1687,9 +1906,8 @@ function AddTenderContent() {
                                     </table>
                                   </div>
                                 </div>
-                              </div>
                             </div>
-                          )}
+                          </div>
                         </div>
 
                         <div className="row">
@@ -1813,9 +2031,9 @@ function AddTenderContent() {
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
-                                  handleQuantityChange(editingItem.internalId, editingItem.quantity - 1);
+                                  handleQuantityChange(editingItem.internalId, Math.max(0, Number((editingItem.quantity - 0.1).toFixed(1))));
                                 }}
-                                disabled={editingItem.quantity <= 1}
+                                disabled={editingItem.quantity <= 0}
                                 style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                               >
                                 <i className="bi bi-dash"></i>
@@ -1825,11 +2043,19 @@ function AddTenderContent() {
                                 className="form-control text-center mx-2"
                                 style={{ width: '80px', height: '32px', borderRadius: '6px' }}
                                 value={editingItem.quantity}
-                                min="1"
+                                min="0"
+                                step="any"
                                 onChange={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
                                   handleQuantityChange(editingItem.internalId, e.target.value);
+                                }}
+                                onBlur={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  // Format to 1 decimal place when user finishes editing
+                                  const formattedValue = Number(e.target.value || 0).toFixed(1);
+                                  handleQuantityChange(editingItem.internalId, formattedValue);
                                 }}
                               />
                               <button 
@@ -1838,7 +2064,7 @@ function AddTenderContent() {
                                 onClick={(e) => {
                                   e.preventDefault();
                                   e.stopPropagation();
-                                  handleQuantityChange(editingItem.internalId, editingItem.quantity + 1);
+                                  handleQuantityChange(editingItem.internalId, Number((editingItem.quantity + 0.1).toFixed(1)));
                                 }}
                                 style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                               >
@@ -1856,7 +2082,7 @@ function AddTenderContent() {
                               {Math.round(editingItem.totalPrice)} ريال
                             </div>
                             <small className="text-success">
-                              ({editingItem.quantity} × {Math.round(editingItem.unitPrice)})
+                              ({editingItem.quantity.toFixed(1)} × {Math.round(editingItem.unitPrice)})
                             </small>
                           </td>
                         </tr>
@@ -1873,7 +2099,7 @@ function AddTenderContent() {
                         {getTotalEditPrice()} ريال
                       </span>
                       <span className="badge bg-info ms-2">
-                        {editingItem.quantity} قطعة
+                        {editingItem.quantity.toFixed(1)} قطعة
                       </span>
                     </div>
                     <div className="d-flex gap-2">
@@ -1951,7 +2177,7 @@ function AddTenderContent() {
           uploadingDocument={uploadingDocument}
           setUploadingDocument={setUploadingDocument}
           handleDocumentUpload={handleDocumentUpload}
-          handleDeleteClick={handleDeleteClick}
+          handleDeleteClick={handleDocumentDeleteClick}
           deleting={deleting}
         />
 
@@ -2081,6 +2307,7 @@ function AddTenderContent() {
         )}
 
       </div>
+
     </>
   );
 }

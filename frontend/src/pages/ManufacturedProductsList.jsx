@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import SidebarButtons from '../components/SidebarButtons';
@@ -12,6 +13,7 @@ function ManufacturedProductsListContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const { isTimelineVisible } = useActivityTimeline();
+  const navigate = useNavigate();
 
   const handleToggle = () => {
     setSidebarCollapsed(!sidebarCollapsed);
@@ -76,7 +78,7 @@ function ManufacturedProductsListContent() {
                           </h5>
                         </div>
                         <button 
-                          onClick={() => window.location.href = '/manufactured-products/add'}
+                          onClick={() => navigate('/manufactured-products/add')}
                           className="btn btn-primary"
                           style={{ 
                             height: '32px', 

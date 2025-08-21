@@ -22,11 +22,11 @@ import { generateId, generateUUID, ENTITY_PREFIXES } from '../utils/idGenerator.
 
 const RAW_MATERIALS_COLLECTION = 'rawmaterials';
 
-// Helper function to trigger data sync across pages
+// Helper function to trigger data sync across pages (Firestore real-time)
 const triggerDataSync = () => {
-  localStorage.setItem('rawMaterials_updated', Date.now().toString());
   // Trigger custom event for same-page components
   window.dispatchEvent(new CustomEvent('rawMaterialsUpdated'));
+  // Note: Firestore real-time listeners will handle cross-tab sync automatically
 };
 
 export class RawMaterialService {

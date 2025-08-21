@@ -6,13 +6,14 @@ import SidebarButtons from '../components/SidebarButtons';
 import SimpleActivityTimeline from '../components/SimpleActivityTimeline';
 import ManualActivityCreator from '../components/ManualActivityCreator';
 import { ForeignProductService } from '../services/foreignProductService';
-import { TenderItemsService } from '../services/TenderItemsService';
+import { TenderItemsServiceNew } from '../services/TenderItemsServiceNew';
 import { useActivity } from '../components/ActivityManager';
 import { ActivityProvider, AutoActivityTracker } from '../components/ActivityManager';
 import ModernSpinner from '../components/ModernSpinner';
 import CustomAlert from '../components/CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 
 function ForeignProductTenderContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -41,9 +42,9 @@ function ForeignProductTenderContent() {
     
     // Listen for storage events to sync data changes from other pages
     const handleStorageChange = (e) => {
-      if (e.key === 'foreignProducts_updated') {
+      // Firestore real-time listeners handle data sync automatically
+      if (e.type === 'foreignProductsUpdated') {
         loadForeignProducts();
-        localStorage.removeItem('foreignProducts_updated');
       }
     };
     
@@ -114,31 +115,37 @@ function ForeignProductTenderContent() {
     }
   };
 
-  const handleAddSelectedProducts = () => {
+  const handleAddSelectedProducts = async () => {
     if (selectedProducts.length === 0) {
       showError('يرجى اختيار منتج أجنبي واحد على الأقل', 'لا توجد منتجات مختارة');
       return;
     }
 
-    // Check for duplicates in existing items
-    const existingPendingItems = sessionStorage.getItem('pendingTenderItems');
+    // 🔧 CRITICAL FIX: Fetch existing items once and reuse to prevent race conditions
+    console.log('🔍 FOREIGN PRODUCTS: Fetching existing items for duplicate check...');
+    const existingPendingItems = await FirestorePendingDataService.getPendingTenderItems() || [];
+    console.log('📦 FOREIGN PRODUCTS: Existing items found:', existingPendingItems.length);
+    
     let existingMaterialIds = [];
     
-    if (existingPendingItems) {
-      try {
-        const parsedExistingItems = JSON.parse(existingPendingItems);
-        if (Array.isArray(parsedExistingItems)) {
-          existingMaterialIds = parsedExistingItems.map(item => item.materialInternalId);
-        }
-      } catch (error) {
-        console.error('Error parsing existing items:', error);
-      }
+    // 🔧 FIXED: FirestorePendingDataService returns objects directly, not JSON strings
+    if (existingPendingItems && Array.isArray(existingPendingItems)) {
+      existingMaterialIds = existingPendingItems.map(item => item.materialInternalId);
+      console.log('🆔 FOREIGN PRODUCTS: Existing material IDs:', existingMaterialIds);
     }
 
     // Filter out duplicates from selected products
     const duplicateItems = [];
     const uniqueSelectedProducts = selectedProducts.filter(product => {
-      const isDuplicate = existingMaterialIds.includes(product.internalId);
+      // Check ALL possible ID fields
+      const possibleIds = [
+        product.internalId,
+        product.id,
+        product.materialInternalId,
+        product.materialId
+      ].filter(Boolean);
+      
+      const isDuplicate = possibleIds.some(id => existingMaterialIds.includes(id));
       if (isDuplicate) {
         duplicateItems.push(product.name);
       }
@@ -190,10 +197,11 @@ function ForeignProductTenderContent() {
   };
 
   const handleQuantityChange = (itemId, newQuantity) => {
-    const quantity = Math.max(1, parseInt(newQuantity) || 1);
+    // Allow any positive number for manual input, no restrictions
+    const quantity = Math.max(0, parseFloat(newQuantity) || 0);
     setModalItems(prev => prev.map(item => 
       item.id === itemId 
-        ? { ...item, quantity, totalPrice: item.unitPrice * quantity }
+        ? { ...item, quantity: Number(quantity.toFixed(1)), totalPrice: item.unitPrice * Number(quantity.toFixed(1)) }
         : item
     ));
   };
@@ -208,20 +216,32 @@ function ForeignProductTenderContent() {
       console.log('🛡️ STARTING DUPLICATE PREVENTION FOR FOREIGN PRODUCTS...');
       
       // 🛡️ ENHANCED DUPLICATE PREVENTION: Check existing items
-      const existingPendingItems = sessionStorage.getItem('pendingTenderItems');
-      let existingMaterialIds = [];
+      let existingPendingItems = await FirestorePendingDataService.getPendingTenderItems() || [];
       
-      if (existingPendingItems) {
+      // 🔧 FIX: If we're in edit mode (tenderId exists), also get existing items from the tender document
+      if (tenderId && tenderId !== 'new') {
         try {
-          const parsedExistingItems = JSON.parse(existingPendingItems);
-          if (Array.isArray(parsedExistingItems)) {
-            existingMaterialIds = parsedExistingItems.map(item => 
-              item.materialInternalId || item.internalId || item.id
-            ).filter(Boolean);
+          console.log('🎯 EDIT MODE: Loading existing tender items for duplicate check, tender ID:', tenderId);
+          const { tenderServiceNew } = await import('../services/TenderServiceNew');
+          const tender = await tenderServiceNew.getById(tenderId);
+          
+          if (tender && tender.items && Array.isArray(tender.items)) {
+            console.log('📦 EDIT MODE: Found existing tender items:', tender.items.length);
+            // Merge existing tender items with any pending items
+            existingPendingItems = [...existingPendingItems, ...tender.items];
           }
         } catch (error) {
-          console.error('Error parsing existing items:', error);
+          console.error('❌ Error loading existing tender items for duplicate check:', error);
         }
+      }
+      
+      let existingMaterialIds = [];
+      
+      // 🔧 FIXED: FirestorePendingDataService returns objects directly, not JSON strings
+      if (existingPendingItems && Array.isArray(existingPendingItems)) {
+        existingMaterialIds = existingPendingItems.map(item => 
+          item.materialInternalId || item.internalId || item.id
+        ).filter(Boolean);
       }
       
       console.log('🔍 Existing material IDs:', existingMaterialIds);
@@ -231,25 +251,34 @@ function ForeignProductTenderContent() {
         id: item.id
       })));
       
+      // 🚨 FIRST: Check for duplicates WITHOUT creating any arrays yet
       const duplicateItems = [];
-      const uniqueModalItems = modalItems.filter(item => {
-        // 🛡️ FIXED: Check multiple ID fields to ensure we catch duplicates
-        const itemId = item.internalId || item.id;
-        const isDuplicate = existingMaterialIds.includes(itemId);
+      
+      for (const item of modalItems) {
+        // 🛡️ FIXED: Check ALL possible ID fields to ensure we catch duplicates
+        const possibleIds = [
+          item.internalId,
+          item.id,
+          item.materialInternalId,
+          item.materialId
+        ].filter(Boolean);
         
-        console.log(`🔍 DUPLICATE CHECK: "${item.name}" (${itemId}) - Duplicate: ${isDuplicate}`);
+        const isDuplicate = possibleIds.some(id => existingMaterialIds.includes(id));
+        
+        console.log(`🔍 DUPLICATE CHECK: "${item.name}":`);
+        console.log(`  - Possible IDs: [${possibleIds.join(', ')}]`);
+        console.log(`  - Existing IDs: [${existingMaterialIds.join(', ')}]`);
+        console.log(`  - Is Duplicate: ${isDuplicate}`);
         
         if (isDuplicate) {
           duplicateItems.push(item.name);
-          return false; // Exclude duplicate
+          console.log(`🚨 DUPLICATE FOUND: "${item.name}" with IDs [${possibleIds.join(', ')}] matches existing items!`);
         }
-        return true; // Include unique item
-      });
+      }
       
       console.log('🛡️ DUPLICATE PREVENTION RESULT:', {
         totalItems: modalItems.length,
         duplicatesFound: duplicateItems.length,
-        uniqueItems: uniqueModalItems.length,
         duplicateNames: duplicateItems
       });
       
@@ -275,78 +304,104 @@ function ForeignProductTenderContent() {
       
       console.log('✅ No duplicates found, proceeding with creation...');
       
-      // Create proper tender items with ID-based relationships
+      // 🎯 NOW SAFE: Create uniqueModalItems since no duplicates were found
+      const uniqueModalItems = modalItems;
+      
+      // 🔧 SIMPLIFIED: Create tender items directly for FirestorePendingDataService
       const tenderItems = [];
       
       for (const item of uniqueModalItems) {
         try {
-          // Create tender item using proper service with product relationship
-          let tenderItem;
-          try {
-            tenderItem = await TenderItemsService.createTenderItem({
-              materialInternalId: item.internalId,
-              materialType: 'foreignProduct',
-              quantity: item.quantity || 1,
-              tenderId: tenderId === 'new' ? 'new' : tenderId
-            });
-          } catch (createError) {
-            console.warn('⚠️ Full creation failed, using simple method:', createError.message);
-            // Fallback to simple creation with current item data
-            tenderItem = await TenderItemsService.createTenderItemSimple({
-              materialInternalId: item.internalId,
-              materialType: 'foreignProduct',
-              materialName: item.name,
-              materialCategory: item.category,
-              materialUnit: item.unit,
-              quantity: item.quantity || 1,
-              unitPrice: item.price || 0,
-              tenderId: tenderId === 'new' ? 'new' : tenderId,
-              supplierInfo: item.supplier || ''
-            });
-          }
+          console.log('🔄 Creating tender item directly:', item.name);
+          
+          // Create tender item directly with all required fields
+          const tenderItem = {
+            internalId: `ti_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Generate unique ID
+            materialInternalId: item.internalId,
+            materialType: 'foreignProduct',
+            materialName: item.name,
+            materialCategory: item.category || '',
+            materialUnit: item.unit || 'قطعة',
+            quantity: item.quantity || 1,
+            unitPrice: item.unitPrice || item.price || 0,
+            totalPrice: (item.quantity || 1) * (item.unitPrice || item.price || 0),
+            supplierInfo: item.displaySupplier || item.supplier || '',
+            tenderId: tenderId === 'new' ? 'new' : tenderId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
           
           tenderItems.push(tenderItem);
           
-          console.log('Created tender item with ID relationship:', {
-            tenderItemId: tenderItem.internalId,
-            linkedProductId: tenderItem.materialInternalId,
-            productName: tenderItem.materialName,
-            currentPrice: tenderItem.unitPrice,
+          console.log('✅ Created tender item directly:', {
+            internalId: tenderItem.internalId,
+            materialName: tenderItem.materialName,
+            quantity: tenderItem.quantity,
+            unitPrice: tenderItem.unitPrice,
             totalPrice: tenderItem.totalPrice
           });
           
         } catch (itemError) {
-          console.error('Error creating tender item for product:', item.name, itemError);
-          showError(`فشل في إضافة المنتج: ${item.name}`, 'خطأ في البيانات');
+          console.error('❌ Error creating tender item for product:', item.name, itemError);
+          showError(`فشل في إضافة المنتج "${item.name}": ${itemError.message || 'خطأ غير معروف'}`, 'خطأ في البيانات');
           return;
         }
       }
       
-      // Get existing items and merge with new items (prevent duplicates)
-      const existingSessionItems = sessionStorage.getItem('pendingTenderItems');
-      let allItems = [...tenderItems]; // Start with new items
+      // 🔧 CRITICAL DEBUG: Get existing items and merge with new items (duplicates already filtered out)
+      console.log('🔍 MERGE PHASE: Fetching existing items for merge...');
+      const existingItems = await FirestorePendingDataService.getPendingTenderItems() || [];
+      console.log('📦 MERGE PHASE: Existing items fetched:', {
+        count: existingItems.length,
+        items: existingItems.map(item => ({
+          id: item.materialInternalId,
+          name: item.materialName,
+          type: item.materialType
+        }))
+      });
       
-      if (existingSessionItems) {
+      let allItems = [...tenderItems]; // Start with new items
+      console.log('🆕 MERGE PHASE: Starting with new items:', tenderItems.length);
+      
+      if (existingItems.length > 0) {
         try {
-          const parsedExistingItems = JSON.parse(existingSessionItems);
-          if (Array.isArray(parsedExistingItems)) {
+          if (Array.isArray(existingItems)) {
+            console.log('🔄 MERGE PHASE: Refreshing pricing for existing items...');
             // Refresh pricing for existing items before merging
-            const refreshedExistingItems = await TenderItemsService.refreshTenderItemsPricing(parsedExistingItems);
+            const refreshedExistingItems = await TenderItemsServiceNew.refreshTenderItemsPricing(existingItems);
+            console.log('💰 MERGE PHASE: Price refresh completed:', {
+              originalCount: existingItems.length,
+              refreshedCount: refreshedExistingItems.length,
+              refreshedItems: refreshedExistingItems.map(item => ({
+                id: item.materialInternalId,
+                name: item.materialName,
+                price: item.unitPrice
+              }))
+            });
             
             // ✅ SAFE MERGE: Duplicates already prevented above, no need for additional filtering
-            console.log('🔄 SAFE MERGE: Our enhanced duplicate prevention handled conflicts, merging safely');
+            console.log('🔄 MERGE PHASE: Performing safe merge...');
+            console.log('📋 Before merge - Existing items:', refreshedExistingItems.length);
+            console.log('📋 Before merge - New items:', tenderItems.length);
+            
             allItems = [...refreshedExistingItems, ...tenderItems];
             
-            console.log('Duplicate prevention results:', {
-              existingPendingItemsCount: refreshedExistingItems.length,
+            console.log('✅ MERGE PHASE: Safe merge completed:', {
+              existingItemsCount: refreshedExistingItems.length,
               newItemsCount: tenderItems.length,
-              duplicatesFiltered: refreshedExistingItems.length - uniqueExistingItems.length,
-              finalItemsCount: allItems.length
+              finalItemsCount: allItems.length,
+              finalItems: allItems.map(item => ({
+                id: item.materialInternalId,
+                name: item.materialName,
+                type: item.materialType
+              }))
             });
           }
         } catch (error) {
-          console.error('Error parsing existing items:', error);
+          console.error('❌ MERGE PHASE: Error in merge operation:', error);
         }
+      } else {
+        console.log('📭 MERGE PHASE: No existing items found, using only new items');
       }
       
       console.log('Storing ID-based tender items:', {
@@ -361,7 +416,27 @@ function ForeignProductTenderContent() {
         }))
       });
       
-      sessionStorage.setItem('pendingTenderItems', JSON.stringify(allItems));
+      await FirestorePendingDataService.setPendingTenderItems(allItems);
+      console.log('✅ STORAGE COMPLETE - Stored items to FirestorePendingDataService:', allItems.length);
+      
+      // 🔍 DEEP DEBUG: Verify storage immediately after saving
+      setTimeout(async () => {
+        const verifyItems = await FirestorePendingDataService.getPendingTenderItems();
+        console.log('🔍 VERIFICATION: Items in storage after save:', {
+          count: verifyItems?.length || 0,
+          items: verifyItems
+        });
+      }, 100);
+
+      // Dispatch custom event to notify AddTender page
+      console.log('📡 DISPATCHING CUSTOM EVENT: tenderItemsAdded');
+      window.dispatchEvent(new CustomEvent('tenderItemsAdded', {
+        detail: { 
+          count: tenderItems.length, 
+          type: 'foreignProduct',
+          items: allItems
+        }
+      }));
 
       // Log activity
       try {
@@ -374,21 +449,24 @@ function ForeignProductTenderContent() {
       }
       
       // Show success message
-      showSuccess(`تم إضافة ${tenderItems.length} منتج أجنبي للمناقصة مع ربط الأسعار الديناميكي`, 'تمت الإضافة');
+      showSuccess(
+        `تم إضافة ${tenderItems.length} منتج أجنبي بنجاح إلى قائمة المناقصة`,
+        'نجحت العملية'
+      );
       
       // Close modal and navigate back to AddTender
       setShowQuantityModal(false);
       setModalItems([]);
       setDuplicateWarning(null); // Clear warning on success
       
-      // Navigate back to AddTender page with a slight delay
+      // Navigate back to AddTender page with delay to show success message
       setTimeout(() => {
         if (tenderId === 'new') {
           navigate('/tenders/add');
         } else {
           navigate(`/tenders/edit/${tenderId}`);
         }
-      }, 100);
+      }, 2000); // 2 seconds to show success message
       
     } catch (error) {
       console.error('Error in handleConfirmQuantities:', error);
@@ -437,7 +515,7 @@ function ForeignProductTenderContent() {
   return (
     <>
       <div className={`page-wrapper ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-        <Header onToggle={handleToggle} />
+          <Header onToggle={handleToggle} />
         
         <div className="main-container" style={{
           paddingRight: sidebarCollapsed ? '72px' : '250px',
@@ -769,8 +847,8 @@ function ForeignProductTenderContent() {
                               <button 
                                 type="button" 
                                 className="btn btn-outline-secondary btn-sm"
-                                onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
-                                disabled={item.quantity <= 1}
+                                onClick={() => handleQuantityChange(item.id, Math.max(0, Number((item.quantity - 0.1).toFixed(1))))}
+                                disabled={item.quantity <= 0}
                                 style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                               >
                                 <i className="bi bi-dash"></i>
@@ -780,13 +858,19 @@ function ForeignProductTenderContent() {
                                 className="form-control text-center mx-2"
                                 style={{ width: '80px', height: '32px', borderRadius: '6px' }}
                                 value={item.quantity}
-                                min="1"
+                                min="0"
+                                step="any"
                                 onChange={(e) => handleQuantityChange(item.id, e.target.value)}
+                                onBlur={(e) => {
+                                  // Format to 1 decimal place when user finishes editing
+                                  const formattedValue = Number(e.target.value || 0).toFixed(1);
+                                  handleQuantityChange(item.id, formattedValue);
+                                }}
                               />
                               <button 
                                 type="button" 
                                 className="btn btn-outline-secondary btn-sm"
-                                onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                                onClick={() => handleQuantityChange(item.id, Number((item.quantity + 0.1).toFixed(1)))}
                                 style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                               >
                                 <i className="bi bi-plus"></i>
@@ -803,7 +887,7 @@ function ForeignProductTenderContent() {
                               {Math.round(item.totalPrice)} ريال
                             </div>
                             <small className="text-success">
-                              ({item.quantity} × {Math.round(item.unitPrice)})
+                              ({item.quantity.toFixed(1)} × {Math.round(item.unitPrice)})
                             </small>
                           </td>
                         </tr>
@@ -821,7 +905,7 @@ function ForeignProductTenderContent() {
                       {getTotalModalPrice()} ريال
                     </span>
                     <span className="badge bg-info ms-2">
-                      {modalItems.reduce((total, item) => total + item.quantity, 0)} قطعة
+                      {modalItems.reduce((total, item) => total + item.quantity, 0).toFixed(1)} قطعة
                     </span>
                   </div>
                   <div className="d-flex gap-2">
@@ -844,7 +928,10 @@ function ForeignProductTenderContent() {
                     <button 
                       type="button" 
                       className="btn btn-primary"
-                      onClick={handleConfirmQuantities}
+                      onClick={() => {
+                        console.log('🔥 CONFIRM BUTTON CLICKED! Modal items:', modalItems);
+                        handleConfirmQuantities();
+                      }}
                       style={{ 
                         height: '32px', 
                         width: '80px', 

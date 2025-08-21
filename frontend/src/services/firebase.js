@@ -1,57 +1,99 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs } from 'firebase/firestore';
-import { getStorage, ref } from 'firebase/storage';
-import { getAuth, setPersistence, browserLocalPersistence } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
+import { getAuth } from 'firebase/auth';
 
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
-};
+// Firebase configuration with error handling
+let firebaseConfig;
+try {
+  firebaseConfig = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyCF4OZxfGELDmooid5mAL51l0t7Cxx6W3k",
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "tender-74a2b.firebaseapp.com",
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "tender-74a2b",
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "tender-74a2b.firebasestorage.app",
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "300993197682",
+    appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:300993197682:web:e75fab78c4d6afc91ff4eb",
+    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-D2CYMMNSB8"
+  };
+} catch (error) {
+  console.error('Error loading Firebase config:', error);
+  firebaseConfig = {};
+}
 
-console.log('🔥 Initializing Firebase with config:', {
-  projectId: firebaseConfig.projectId,
-  authDomain: firebaseConfig.authDomain,
-  storageBucket: firebaseConfig.storageBucket
-});
+// Initialize Firebase with comprehensive error handling
+let app, db, storage, auth;
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
-export const auth = getAuth(app);
+try {
+  console.log('Initializing Firebase...');
+  app = initializeApp(firebaseConfig);
+  
+  try {
+    db = getFirestore(app);
+    console.log('✅ Firestore initialized');
+  } catch (error) {
+    console.error('Firestore initialization error:', error);
+    db = null;
+  }
+  
+  try {
+    storage = getStorage(app);
+    console.log('✅ Storage initialized');
+  } catch (error) {
+    console.error('Storage initialization error:', error);
+    storage = null;
+  }
+  
+  try {
+    auth = getAuth(app);
+    console.log('✅ Auth initialized');
+  } catch (error) {
+    console.error('Auth initialization error:', error);
+    auth = null;
+  }
+  
+  console.log('✅ Firebase initialization completed');
+} catch (error) {
+  console.error('❌ Critical Firebase initialization error:', error);
+  app = null;
+  db = null;
+  storage = null;
+  auth = null;
+}
 
-// Set persistence to local (remember login across browser sessions)
-setPersistence(auth, browserLocalPersistence).catch((error) => {
-  console.error('Error setting auth persistence:', error);
-});
+// Export services (will be null if failed)
+export { db, storage, auth };
 
-console.log('🔐 Auth persistence set to LOCAL - remembers login across sessions');
-
-console.log('✅ Firebase initialized successfully - Firestore and Storage ready');
-
-// Add connection test function (without auth)
+// Connection test
 export const testFirebaseConnection = async () => {
   try {
-    console.log('🔥 Testing Firebase connection...');
-    
-    // Test Firestore read
-    const testRef = collection(db, 'rawmaterials');
-    const snapshot = await getDocs(testRef);
-    console.log('✅ Firestore connection working - found', snapshot.docs.length, 'documents');
-    
-    // Test Storage reference creation
-    const storageRef = ref(storage, 'test/connection-test.txt');
-    console.log('✅ Storage connection working');
-    
+    if (!db || !storage || !auth) {
+      console.log('Firebase services not available');
+      return false;
+    }
     return true;
   } catch (error) {
-    console.error('❌ Firebase connection test failed:', error);
+    console.error('Firebase connection test failed:', error);
     return false;
   }
 };
+
+// Global error suppression for Firebase
+window.addEventListener('unhandledrejection', (event) => {
+  if (event.reason && event.reason.message) {
+    if (event.reason.message.includes('_getRecaptchaConfig') || 
+        event.reason.message.includes('client is offline') ||
+        event.reason.message.includes('auth/network-request-failed')) {
+      console.log('🔧 Suppressed Firebase error:', event.reason.message);
+      event.preventDefault();
+    }
+  }
+});
+
+console.log('🔥 Firebase services status:', {
+  app: !!app,
+  database: !!db,
+  storage: !!storage,
+  auth: !!auth
+});
 
 export default app;

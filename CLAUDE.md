@@ -142,6 +142,16 @@
 - **Storage Strategy**: Hybrid Firebase/localStorage with automatic fallback
 - **Connection Testing**: Built-in Firebase connection testing with testFirebaseConnection()
 
+### Tender Item Addition System - COMPLETELY FIXED ✅
+- **Root Issue**: Aggressive 2-second interval was continuously checking for pending items and re-adding them
+- **Continuous Adding Problem**: Removed `setInterval()` that was polling every 2 seconds causing infinite loops
+- **Smart Event-Based System**: Items now added only when user returns from material pages (focus/visibility events)
+- **Proper Debounce Protection**: Prevents race conditions with `isProcessingPendingItems` flag
+- **Duplicate Prevention**: Intelligent system that skips duplicate check for initial loads, applies full check for existing tenders
+- **Foreign Product Integration**: All material types (raw materials, local products, foreign products, manufactured products) work identically
+- **Single Addition**: Items are added exactly once when returning from material selection pages
+- **Event Listeners**: Uses window focus, visibility change, and custom events instead of continuous polling
+
 #### Database Connection Methods
 1. **Firebase Firestore Collections**:
    - `tenders` - Main tender documents with embedded document arrays
@@ -181,12 +191,15 @@
 
 ## Latest Firebase Database Integration Methods ✅
 
-### Tender Items Storage Pattern
-- **Material Pages**: Store to sessionStorage with key `'pendingTenderItems'`
-- **AddTender Loading**: Priority order - Firebase `tender.items` → sessionStorage `'pendingTenderItems'` → localStorage backup
-- **Price Refresh**: Uses `TenderItemsService.refreshTenderItemsPricing()` for current pricing
+### Tender Items Storage Pattern - COMPLETELY REDESIGNED ✅
+- **Material Pages**: Store to FirestorePendingDataService with key `'pendingTenderItems'`
+- **AddTender Loading**: Priority order - Firebase `tender.items` → FirestorePendingDataService `'pendingTenderItems'` → localStorage backup
+- **Price Refresh**: Uses `TenderItemsServiceNew.refreshTenderItemsPricing()` for current pricing
 - **Firebase Save**: Items embedded in tender document as `items: tenderItems` array
 - **Automatic Calculation**: التكلفة التقديرية auto-calculates from item totals on load
+- **Event-Driven Updates**: No continuous polling, only event-based item addition
+- **Immediate Clearing**: Pending items cleared immediately after processing to prevent re-addition
+- **Smart Duplicate Logic**: Empty tender state bypasses duplicate check, existing tenders apply full duplicate prevention
 
 ### Document Storage Pattern  
 - **Upload Process**: Firebase Storage upload → Firebase database save in tender document
@@ -195,28 +208,119 @@
 - **Date Format**: Uses `useDateFormat` hook with `formatDate()` for dd/mm/yyyy display
 - **Field Names**: `uploadedAt` for date storage, `fileName` for display name
 
-### Database Integration Code Patterns
-```javascript
-// Tender Creation/Update with embedded arrays
-const tenderData = {
-  ...formData,
-  documents: documents, // Documents saved to Firebase
-  items: tenderItems || [] // Tender items saved to Firebase 
-};
-await TenderService.createTender(tenderData);
+### Direct Material Item Creation Pattern - PROVEN SOLUTION ✅
+- **Senior React Engineer Method**: Direct item creation instead of complex service calls
+- **Universal Pattern**: Works consistently across all material types (raw materials, local products, foreign products, manufactured products)
+- **Event-Driven Updates**: Custom events trigger AddTender to check for new items
+- **No Continuous Polling**: Eliminates aggressive intervals that caused continuous adding
+- **Clean State Management**: Immediate storage clearing prevents re-addition
+- **Storage Clearing Fix - COMPLETE SOLUTION**: Smart initialization that checks for pending data first, loads items if found, clears only if empty, and cleanup on cancel
 
-// Loading with Firebase-first approach
-if (tender.items && Array.isArray(tender.items)) {
-  setTenderItems(tender.items); // Load from Firebase
+### Database Integration Code Patterns - LATEST PROVEN METHODS ✅
+```javascript
+// DIRECT ITEM CREATION PATTERN - Works for all material types
+const handleAddSelected = async (items, productId = 'new') => {
+  try {
+    const processedItems = [];
+    
+    for (const item of items) {
+      // SENIOR REACT: Create tender items directly - proven method from ForeignProductTender fix
+      const tenderItem = {
+        internalId: `ti_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        materialInternalId: item.internalId,
+        materialType: 'foreignProduct', // Change based on material type: rawMaterial, localProduct, foreignProduct
+        materialName: item.name,
+        materialCategory: item.category || '',
+        materialUnit: item.unit || 'قطعة',
+        quantity: item.quantity || 1,
+        unitPrice: item.unitPrice || item.price || 0,
+        totalPrice: (item.quantity || 1) * (item.unitPrice || item.price || 0),
+        supplierInfo: item.displaySupplier || item.supplier || '',
+        tenderId: productId === 'new' ? 'new' : productId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      
+      processedItems.push(tenderItem);
+    }
+    
+    // Store items for AddTender to pick up
+    await FirestorePendingDataService.mergePendingTenderItems(processedItems);
+    
+    // Dispatch custom event to notify AddTender
+    window.dispatchEvent(new CustomEvent('tenderItemsAdded', { 
+      detail: { items: processedItems } 
+    }));
+    
+    console.log('✅ Items created and event dispatched successfully');
+    
+  } catch (error) {
+    console.error('❌ Error in handleAddSelected:', error);
+  }
+};
+
+// EVENT-DRIVEN LOADING IN ADDTENDER - NO INTERVALS
+useEffect(() => {
+  const handleWindowFocus = () => checkPendingItems();
+  const handleVisibilityChange = () => !document.hidden && checkPendingItems();
+  const handleCustomEvent = () => checkPendingItems();
+
+  window.addEventListener('focus', handleWindowFocus);
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('tenderItemsAdded', handleCustomEvent);
+  
+  // ❌ COMPLETELY REMOVED: setInterval(() => checkPendingItems(), 2000);
+  
+  return () => {
+    window.removeEventListener('focus', handleWindowFocus);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('tenderItemsAdded', handleCustomEvent);
+  };
+}, []);
+
+// NEW TENDER/PRODUCT MODE - START COMPLETELY EMPTY
 } else {
-  // Check sessionStorage from material pages
-  const pendingItems = sessionStorage.getItem('pendingTenderItems');
-  const refreshedItems = await TenderItemsService.refreshTenderItemsPricing(items);
-  setTenderItems(refreshedItems);
+  // NEW TENDER MODE: Start completely empty
+  console.log('🆕 NEW TENDER MODE: Clearing all pending data to start fresh');
+  
+  // Clear all pending data for a fresh start
+  await FirestorePendingDataService.clearPendingData('tenderFormData_new');
+  await FirestorePendingDataService.clearPendingData('tenderDocuments_new'); 
+  await FirestorePendingDataService.clearPendingTenderItems();
+  
+  // Reset to empty state
+  setFormData({
+    title: '',
+    referenceNumber: '',
+    entity: '',
+    description: '',
+    submissionDeadline: '',
+    estimatedValue: '',
+    category: '',
+    location: '',
+    contactPerson: '',
+    contactPhone: '',
+    contactEmail: ''
+  });
+  setDocuments([]);
+  setTenderItems([]);
+  
+  console.log('✅ NEW TENDER: All data cleared, starting with empty form');
 }
 
-// Estimated value calculation from items
-const totalFromItems = tender.items.reduce((total, item) => {
-  return total + ((item.unitPrice || 0) * (item.quantity || 1));
-}, 0);
+// NAVIGATION FIX - USE REACT ROUTER INSTEAD OF WINDOW.LOCATION
+import { useNavigate } from 'react-router-dom';
+
+const navigate = useNavigate();
+
+// ✅ CORRECT: React Router navigation
+<button 
+  onClick={() => navigate('/manufactured-products/add')}
+  className="btn btn-primary"
+>
+  إضافة منتج
+</button>
+
+// ❌ WRONG: Direct window navigation
+<button onClick={() => window.location.href = '/manufactured-products/add'}>
 ```

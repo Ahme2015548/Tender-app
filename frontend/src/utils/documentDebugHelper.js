@@ -1,29 +1,31 @@
 // Document Debug Helper - Copy to Browser Console for Testing
 // Add this to browser console to debug document persistence
 
+import { sessionDataService } from '../services/SessionDataService';
+
 window.debugDocuments = {
   // Check current session data
-  checkSession() {
-    const sessionId = sessionStorage.getItem('newTenderSessionId');
-    const tempDocs = sessionStorage.getItem(`tempDocuments_${sessionId}`);
+  async checkSession() {
+    const sessionId = await sessionDataService.getSessionData('newTenderSessionId');
+    const tempDocs = await sessionDataService.getSessionData(`tempDocuments_${sessionId}`) || [];
     
     console.log('🔍 Session Debug Info:');
     console.log('Session ID:', sessionId);
     console.log('Temp Documents Key:', `tempDocuments_${sessionId}`);
-    console.log('Temp Documents:', tempDocs ? JSON.parse(tempDocs) : 'None');
+    console.log('Temp Documents:', tempDocs);
     
     return {
       sessionId,
-      tempDocuments: tempDocs ? JSON.parse(tempDocs) : []
+      tempDocuments: tempDocs
     };
   },
 
   // Clear all session data
-  clearSession() {
-    const sessionId = sessionStorage.getItem('newTenderSessionId');
+  async clearSession() {
+    const sessionId = await sessionDataService.getSessionData('newTenderSessionId');
     if (sessionId) {
-      sessionStorage.removeItem(`tempDocuments_${sessionId}`);
-      sessionStorage.removeItem('newTenderSessionId');
+      await sessionDataService.clearSessionData(`tempDocuments_${sessionId}`);
+      await sessionDataService.clearSessionData('newTenderSessionId');
       console.log('✅ Cleared all session data');
     } else {
       console.log('ℹ️ No session data to clear');
@@ -33,7 +35,7 @@ window.debugDocuments = {
   // Test document persistence
   async testPersistence() {
     const { TenderDocumentService } = await import('../services/TenderDocumentService.js');
-    const sessionId = sessionStorage.getItem('newTenderSessionId');
+    const sessionId = await sessionDataService.getSessionData('newTenderSessionId');
     
     if (!sessionId) {
       console.log('❌ No session ID found');

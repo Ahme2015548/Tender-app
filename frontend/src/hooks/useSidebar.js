@@ -1,22 +1,31 @@
 import { useState, useEffect } from 'react';
+import { userSettingsService } from '../services/UserSettingsService';
 
 export function useSidebar() {
-  const [isCollapsed, setIsCollapsed] = useState(() => {
-    try {
-      const saved = localStorage.getItem('sidebarCollapsed');
-      return saved ? JSON.parse(saved) : false;
-    } catch {
-      return false;
-    }
-  });
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    try {
-      localStorage.setItem('sidebarCollapsed', JSON.stringify(isCollapsed));
-    } catch {
-      // Handle localStorage errors
+    const loadSidebarState = async () => {
+      try {
+        await userSettingsService.initialize();
+        const saved = userSettingsService.getSidebarCollapsed();
+        setIsCollapsed(saved);
+      } catch (error) {
+        console.error('Error loading sidebar state:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadSidebarState();
+  }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      userSettingsService.setSidebarCollapsed(isCollapsed);
     }
-  }, [isCollapsed]);
+  }, [isCollapsed, loading]);
 
   const toggleSidebar = () => {
     setIsCollapsed(prev => !prev);
@@ -24,6 +33,7 @@ export function useSidebar() {
 
   return {
     isCollapsed,
-    toggleSidebar
+    toggleSidebar,
+    loading
   };
 }

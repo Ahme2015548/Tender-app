@@ -1,0 +1,204 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions for authentication and ownership
+    function isAuthed() { 
+      return request.auth != null; 
+    }
+    
+    function isOwner() { 
+      return request.auth != null && request.auth.uid == resource.data.ownerId; 
+    }
+    
+    function newIsOwner() { 
+      return request.auth != null && request.auth.uid == request.resource.data.ownerId; 
+    }
+    
+    function isValidUser() {
+      return isAuthed() && request.auth.uid != null;
+    }
+    
+    // Ownership verification for updates
+    function maintainsOwnership() {
+      return request.resource.data.ownerId == resource.data.ownerId;
+    }
+    
+    // Version control for optimistic locking
+    function hasValidVersion() {
+      return request.resource.data.version is int && 
+             request.resource.data.version > resource.data.version;
+    }
+    
+    // Required fields validation
+    function hasRequiredFields() {
+      return request.resource.data.ownerId is string &&
+             request.resource.data.createdAt != null &&
+             request.resource.data.updatedAt != null &&
+             request.resource.data.version is int;
+    }
+
+    // Employee documents (for authentication)
+    match /employees/{employeeId} {
+      allow read: if isAuthed() && request.auth.uid == employeeId;
+      allow write: if false; // Employees should be managed through admin interface
+    }
+
+    // Tenders collection
+    match /tenders/{tenderId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      
+      // Additional validation for updates
+      allow update: if isOwner() && maintainsOwnership() && hasValidVersion();
+    }
+
+    // Tender Items collection  
+    match /tenderItems/{itemId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      allow update: if isOwner() && maintainsOwnership() && hasValidVersion();
+    }
+
+    // Tender Documents collection
+    match /tenderDocuments/{documentId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      allow update: if isOwner() && maintainsOwnership() && hasValidVersion();
+    }
+
+    // Raw Materials collection
+    match /rawmaterials/{materialId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      allow update: if isOwner() && maintainsOwnership() && hasValidVersion();
+    }
+
+    // Local Products collection
+    match /localproducts/{productId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      allow update: if isOwner() && maintainsOwnership() && hasValidVersion();
+    }
+
+    // Foreign Products collection
+    match /foreignproducts/{productId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      allow update: if isOwner() && maintainsOwnership() && hasValidVersion();
+    }
+
+    // Suppliers collection
+    match /suppliers/{supplierId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      allow update: if isOwner() && maintainsOwnership() && hasValidVersion();
+    }
+
+    // Customers collection
+    match /customers/{customerId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      allow update: if isOwner() && maintainsOwnership() && hasValidVersion();
+    }
+
+    // Companies collection
+    match /companies/{companyId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      allow update: if isOwner() && maintainsOwnership() && hasValidVersion();
+    }
+
+    // Manufactured Products collection
+    match /manufacturedproducts/{productId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      allow update: if isOwner() && maintainsOwnership() && hasValidVersion();
+    }
+
+    // Price Quotes collection (if separate from materials)
+    match /pricequotes/{quoteId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      allow update: if isOwner() && maintainsOwnership() && hasValidVersion();
+    }
+
+    // Activity Logs collection (optional - for audit trail)
+    match /activitylogs/{logId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read: if isOwner();
+      allow update, delete: if false; // Activity logs should be immutable
+    }
+
+    // Settings collection (user-specific settings)
+    match /usersettings/{userId} {
+      allow create, read, update: if isAuthed() && request.auth.uid == userId;
+      allow delete: if false; // Don't allow deletion of settings
+    }
+
+    // Trash/Recovery collection (for soft deletes)
+    match /trash/{itemId} {
+      allow create: if isAuthed() && newIsOwner() && hasRequiredFields();
+      allow read, update, delete: if isOwner();
+      allow update: if isOwner() && maintainsOwnership();
+    }
+
+    // System collections (admin only - implement admin check)
+    match /systemconfig/{configId} {
+      allow read: if isAuthed();
+      allow write: if false; // Only allow through admin interface
+    }
+
+    // Migration logs (for tracking data migrations)
+    match /migrationlogs/{logId} {
+      allow create: if isAuthed() && newIsOwner();
+      allow read: if isOwner();
+      allow update, delete: if false; // Migration logs are immutable
+    }
+
+    // Deny all other collections by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+// Additional rules for Firebase Storage
+// These would go in storage.rules file
+/*
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Tender documents
+    match /tender-documents/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Price quote documents
+    match /quotations/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Company documents
+    match /company-documents/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Employee documents
+    match /employee-documents/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Profile images
+    match /profile-images/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Deny all other paths
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+*/

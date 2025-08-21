@@ -107,7 +107,6 @@ function Migration() {
       <Sidebar collapsed={sidebarCollapsed} onToggle={handleToggle} />
       
       <div className={`flex-grow-1 ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-        <Header onToggle={handleToggle} />
         
         <div className="d-flex" style={{ height: 'calc(100vh - 60px)' }}>
           <div className={`flex-grow-1 ${isTimelineVisible ? 'timeline-visible' : ''}`}>

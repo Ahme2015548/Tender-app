@@ -16,7 +16,7 @@ import { generateId } from '../utils/idGenerator.js';
 export class SimpleTenderItemsService {
   
   /**
-   * Get all tender items for a tender (Firebase with localStorage fallback)
+   * Get all tender items for a tender (Firebase with SessionDataService fallback)
    */
   static async getTenderItems(tenderId) {
     try {
@@ -42,19 +42,14 @@ export class SimpleTenderItemsService {
           return items;
           
         } catch (firebaseError) {
-          console.error('❌ Firebase failed, using localStorage:', firebaseError);
+          console.error('❌ Firebase failed, using sessionDataService:', firebaseError);
         }
       }
       
-      // Fallback to localStorage
-      const savedItems = localStorage.getItem(`tenderItems_${tenderId || 'new'}`);
-      if (savedItems) {
-        const items = JSON.parse(savedItems);
-        console.log('📦 localStorage: Got tender items:', items.length);
-        return Array.isArray(items) ? items : [];
-      }
-      
-      return [];
+      // Fallback to sessionDataService
+      const items = await sessionDataService.getSessionData(`tenderItems_${tenderId || 'new'}`) || [];
+      console.log('📦 sessionDataService: Got tender items:', items.length);
+      return Array.isArray(items) ? items : [];
       
     } catch (error) {
       console.error('❌ Error getting tender items:', error);
@@ -63,7 +58,7 @@ export class SimpleTenderItemsService {
   }
   
   /**
-   * Add material to tender (Firebase with localStorage backup)
+   * Add material to tender (Firebase with sessionDataService backup)
    */
   static async addMaterialToTender(tenderId, materialData) {
     try {
@@ -95,16 +90,16 @@ export class SimpleTenderItemsService {
           return { id: docRef.id, ...tenderItem };
           
         } catch (firebaseError) {
-          console.error('❌ Firebase add failed, using localStorage:', firebaseError);
+          console.error('❌ Firebase add failed, using sessionDataService:', firebaseError);
         }
       }
       
-      // Add to localStorage
+      // Add to sessionDataService
       const currentItems = await this.getTenderItems(tenderId);
       const updatedItems = [...currentItems, tenderItem];
-      localStorage.setItem(`tenderItems_${tenderId || 'new'}`, JSON.stringify(updatedItems));
+      await sessionDataService.setSessionData(`tenderItems_${tenderId || 'new'}`, updatedItems);
       
-      console.log('📦 localStorage: Added tender item');
+      console.log('📦 sessionDataService: Added tender item');
       return tenderItem;
       
     } catch (error) {
@@ -114,7 +109,7 @@ export class SimpleTenderItemsService {
   }
   
   /**
-   * Delete tender item (Firebase with localStorage backup)
+   * Delete tender item (Firebase with sessionDataService backup)
    */
   static async deleteTenderItem(itemId, tenderId) {
     try {
@@ -131,14 +126,14 @@ export class SimpleTenderItemsService {
         }
       }
       
-      // Remove from localStorage
+      // Remove from sessionDataService
       const currentItems = await this.getTenderItems(tenderId);
       const updatedItems = currentItems.filter(item => 
         item.id !== itemId && item.internalId !== itemId
       );
-      localStorage.setItem(`tenderItems_${tenderId || 'new'}`, JSON.stringify(updatedItems));
+      await sessionDataService.setSessionData(`tenderItems_${tenderId || 'new'}`, updatedItems);
       
-      console.log('📦 localStorage: Deleted tender item');
+      console.log('📦 sessionDataService: Deleted tender item');
       return true;
       
     } catch (error) {

@@ -24,6 +24,16 @@ const ProtectedRoute = ({ children }) => {
     return null; // AuthContext handles loading state
   }
 
+  // Debug the authentication state
+  console.log('🔍 ProtectedRoute Debug:', {
+    isAuthenticated,
+    hasCurrentUser: !!currentUser,
+    currentUserUid: currentUser?.uid,
+    hasEmployeeData: !!employeeData,
+    employeeDataStatus: employeeData?.status,
+    isLoading
+  });
+
   // If not authenticated or no active employee data, show sign-in
   if (!isAuthenticated || !currentUser || !employeeData) {
     return (
@@ -50,7 +60,8 @@ const ProtectedRoute = ({ children }) => {
   }
 
   // User is authenticated and has active employee status - render app
-  console.log('🚀 Rendering dashboard for authenticated user:', employeeData.fullName);
+  console.log('🚀 SUCCESS! Rendering dashboard for authenticated user:', employeeData.fullName);
+  console.log('🎉 Navigation successful - user will see dashboard now');
   
   return (
     <div className="app-wrapper">

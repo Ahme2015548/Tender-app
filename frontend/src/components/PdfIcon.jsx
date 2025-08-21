@@ -1,4 +1,5 @@
 import React from 'react';
+import { ASSETS } from '../utils/assetHelpers';
 
 const PdfIcon = ({ 
   size = 32, 
@@ -25,7 +26,7 @@ const PdfIcon = ({
 
   return (
     <img 
-      src="/assets/images/pdf-icon.png"
+      src={ASSETS.pdfIcon()}
       alt="PDF"
       title={title}
       className={className}

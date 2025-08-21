@@ -47,6 +47,7 @@ class EmployeeDocumentService {
         fileSize: file.size,
         fileType: file.type,
         employeeId: employeeId || 'new',
+        ownerId: fileData.uploadedBy || 'unknown', // Include ownerId for Firestore rules
         uploadedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -81,13 +82,25 @@ class EmployeeDocumentService {
         return [];
       }
 
-      const q = query(
-        collection(db, this.COLLECTION_NAME),
-        where('employeeId', '==', employeeId),
-        orderBy('uploadedAt', 'desc')
-      );
+      let querySnapshot;
+      try {
+        // Try with orderBy first
+        const q = query(
+          collection(db, this.COLLECTION_NAME),
+          where('employeeId', '==', employeeId),
+          orderBy('uploadedAt', 'desc')
+        );
+        querySnapshot = await getDocs(q);
+      } catch (indexError) {
+        console.warn('⚠️ OrderBy query failed (missing index), trying simple where query:', indexError.message);
+        // Fallback to simple where query without orderBy
+        const simpleQ = query(
+          collection(db, this.COLLECTION_NAME),
+          where('employeeId', '==', employeeId)
+        );
+        querySnapshot = await getDocs(simpleQ);
+      }
 
-      const querySnapshot = await getDocs(q);
       const documents = [];
 
       querySnapshot.forEach((doc) => {
@@ -100,10 +113,20 @@ class EmployeeDocumentService {
         });
       });
 
+      // Sort by uploadedAt manually if we didn't use orderBy
+      documents.sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt));
+
       console.log('✅ Loaded employee documents:', documents.length);
       return documents;
     } catch (error) {
       console.error('❌ Error loading employee documents:', error);
+      
+      // For missing collection or permission issues, return empty array instead of throwing
+      if (error.code === 'permission-denied' || error.code === 'not-found') {
+        console.log('📋 Collection not accessible or doesn\'t exist, returning empty array');
+        return [];
+      }
+      
       throw new Error(`فشل في تحميل الوثائق: ${error.message}`);
     }
   }

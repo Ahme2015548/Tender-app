@@ -85,7 +85,7 @@ const RawMaterialsListFixed = ({ refreshTrigger }) => {
     const handleStorageChange = (e) => {
       if (e.key === 'rawMaterials_updated') {
         loadRawMaterials();
-        localStorage.removeItem('rawMaterials_updated');
+        // Firestore real-time listeners handle data sync automatically
       }
     };
     

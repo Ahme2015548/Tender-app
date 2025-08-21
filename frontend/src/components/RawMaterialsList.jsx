@@ -10,6 +10,7 @@ import { useCustomAlert } from '../hooks/useCustomAlert';
 import ModernSpinner from './ModernSpinner';
 import { usePagination } from '../hooks/usePagination';
 import Pagination from './Pagination';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 
 const RawMaterialsList = ({ refreshTrigger }) => {
   const [rawMaterials, setRawMaterials] = useState([]);
@@ -52,7 +53,7 @@ const RawMaterialsList = ({ refreshTrigger }) => {
     const handleStorageChange = (e) => {
       if (e.key === 'rawMaterials_updated') {
         loadRawMaterials();
-        localStorage.removeItem('rawMaterials_updated');
+        // Firestore real-time listeners handle data sync automatically
       }
     };
     
@@ -206,7 +207,7 @@ const RawMaterialsList = ({ refreshTrigger }) => {
   };
 
   // Add selected items to tender
-  const handleAddToTender = () => {
+  const handleAddToTender = async () => {
     const tenderItems = selectedItems.map(item => ({
       internalId: item.internalId,
       type: 'rawMaterials',
@@ -214,8 +215,8 @@ const RawMaterialsList = ({ refreshTrigger }) => {
       addedAt: new Date().toISOString()
     }));
     
-    // Store selected items in sessionStorage as backup
-    sessionStorage.setItem('pendingTenderItems', JSON.stringify(tenderItems));
+    // Store selected items in Firestore as backup
+    await FirestorePendingDataService.setPendingTenderItems(tenderItems);
     
     // Navigate back to tender with selected items
     const backPath = tenderData?.id ? `/tenders/edit/${tenderData.id}` : '/tenders/add';

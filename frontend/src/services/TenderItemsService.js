@@ -17,21 +17,27 @@ import { RawMaterialService } from './rawMaterialService.js';
 import { LocalProductService } from './localProductService.js';
 import { ForeignProductService } from './foreignProductService.js';
 import { ManufacturedProductService } from './ManufacturedProductService.js';
+import { sessionDataService } from './SessionDataService.js';
 
 const TENDER_ITEMS_COLLECTION = 'tenderItems';
 
-// Helper function to trigger data sync across pages
+// Helper function to trigger data sync across pages (Firestore real-time)
 const triggerDataSync = () => {
-  localStorage.setItem('tenderItems_updated', Date.now().toString());
   window.dispatchEvent(new CustomEvent('tenderItemsUpdated'));
+  // Note: Firestore real-time listeners will handle cross-tab sync automatically
 };
 
 export class TenderItemsService {
   
-  // Helper method to check for duplicates in sessionStorage
-  static checkForDuplicates(materialInternalId, storageKey = 'pendingTenderItems') {
+  // Helper method to check for duplicates in sessionDataService
+  static async checkForDuplicates(materialInternalId, storageKey = 'pendingTenderItems') {
     try {
-      const existingItems = JSON.parse(sessionStorage.getItem(storageKey) || '[]');
+      let existingItems;
+      if (storageKey === 'pendingTenderItems') {
+        existingItems = await sessionDataService.getPendingTenderItems() || [];
+      } else {
+        existingItems = await sessionDataService.getSessionData(storageKey) || [];
+      }
       return existingItems.some(item => item.materialInternalId === materialInternalId);
     } catch (error) {
       console.error('Error checking duplicates:', error);
@@ -39,10 +45,16 @@ export class TenderItemsService {
     }
   }
   
-  // Helper method to safely add item to sessionStorage with duplicate prevention
-  static addToSessionStorage(item, storageKey = 'pendingTenderItems') {
+  // Helper method to safely add item to sessionDataService with duplicate prevention
+  static async addToSessionStorage(item, storageKey = 'pendingTenderItems') {
     try {
-      const existingItems = JSON.parse(sessionStorage.getItem(storageKey) || '[]');
+      let existingItems;
+      if (storageKey === 'pendingTenderItems') {
+        existingItems = await sessionDataService.getPendingTenderItems() || [];
+      } else {
+        existingItems = await sessionDataService.getSessionData(storageKey) || [];
+      }
+      
       const isDuplicate = existingItems.some(existingItem => 
         existingItem.materialInternalId === item.materialInternalId
       );
@@ -52,11 +64,17 @@ export class TenderItemsService {
       }
       
       existingItems.push(item);
-      sessionStorage.setItem(storageKey, JSON.stringify(existingItems));
+      
+      if (storageKey === 'pendingTenderItems') {
+        await sessionDataService.setPendingTenderItems(existingItems);
+      } else {
+        await sessionDataService.setSessionData(storageKey, existingItems);
+      }
+      
       console.log(`📦 Item added to ${storageKey}:`, item.materialName);
       return true;
     } catch (error) {
-      console.error('Error adding to sessionStorage:', error);
+      console.error('Error adding to sessionDataService:', error);
       throw error;
     }
   }
@@ -67,7 +85,7 @@ export class TenderItemsService {
       console.log('🏭 Creating manufactured product item:', itemData);
       
       // Check for duplicate before any processing
-      if (this.checkForDuplicates(itemData.materialInternalId, 'pendingProductItems')) {
+      if (await this.checkForDuplicates(itemData.materialInternalId, 'pendingProductItems')) {
         throw new Error(`البند موجود مسبقاً في قائمة المنتج المصنع`);
       }
       
@@ -81,7 +99,7 @@ export class TenderItemsService {
         updatedAt: new Date()
       };
       
-      this.addToSessionStorage(productItem, 'pendingProductItems');
+      await this.addToSessionStorage(productItem, 'pendingProductItems');
       console.log('✅ Manufactured product item created successfully');
       
       return productItem;
@@ -248,7 +266,7 @@ export class TenderItemsService {
       const docRef = await addDoc(collection(db, TENDER_ITEMS_COLLECTION), tenderItemDoc);
       console.log('✅ Tender item saved to Firebase with ID:', docRef.id);
       
-      // Also store in sessionStorage for AddTender page access
+      // Also store in SessionDataService for AddTender page access
       const sessionItem = {
         ...tenderItemDoc,
         id: docRef.id,
@@ -256,10 +274,10 @@ export class TenderItemsService {
         updatedAt: new Date()
       };
       
-      const existingItems = JSON.parse(sessionStorage.getItem('pendingTenderItems') || '[]');
+      const existingItems = await sessionDataService.getPendingTenderItems() || [];
       existingItems.push(sessionItem);
-      sessionStorage.setItem('pendingTenderItems', JSON.stringify(existingItems));
-      console.log('📦 Tender item backed up to sessionStorage');
+      await sessionDataService.setPendingTenderItems(existingItems);
+      console.log('📦 Tender item backed up to SessionDataService');
       
       triggerDataSync();
       
@@ -267,8 +285,8 @@ export class TenderItemsService {
     } catch (error) {
       console.error('❌ Error creating tender item in Firebase:', error);
       
-      // Fallback: Save to sessionStorage only
-      console.log('🔄 Firebase failed, saving to sessionStorage only...');
+      // Fallback: Save to SessionDataService only
+      console.log('🔄 Firebase failed, saving to SessionDataService only...');
       try {
         const fallbackId = `local_${Date.now()}`;
         const fallbackItem = {
@@ -280,13 +298,13 @@ export class TenderItemsService {
           isLocal: true
         };
         
-        const existingItems = JSON.parse(sessionStorage.getItem('pendingTenderItems') || '[]');
+        const existingItems = await sessionDataService.getPendingTenderItems() || [];
         existingItems.push(fallbackItem);
-        sessionStorage.setItem('pendingTenderItems', JSON.stringify(existingItems));
-        console.log('📦 Tender item saved to sessionStorage as fallback');
+        await sessionDataService.setPendingTenderItems(existingItems);
+        console.log('📦 Tender item saved to sessionDataService as fallback');
         return fallbackId;
       } catch (fallbackError) {
-        console.error('❌ Both Firebase and sessionStorage failed:', fallbackError);
+        console.error('❌ Both Firebase and SessionDataService failed:', fallbackError);
         throw new Error('فشل في إنشاء بند المناقصة');
       }
     }
@@ -473,7 +491,7 @@ export class TenderItemsService {
         // Called with tenderId - fetch from Firebase
         currentItems = await this.getTenderItems(tenderIdOrItems);
       } else if (Array.isArray(tenderIdOrItems)) {
-        // Called with items array directly (from sessionStorage)
+        // Called with items array directly (from SessionDataService)
         currentItems = tenderIdOrItems;
       } else {
         console.warn('Invalid parameter for refreshTenderItemsPricing:', tenderIdOrItems);

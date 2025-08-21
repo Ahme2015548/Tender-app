@@ -9,6 +9,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { db } from './firebase.js';
+import { FirestorePendingDataService } from './FirestorePendingDataService.js';
 
 export class SimpleTrashService {
   static COLLECTION_NAME = 'trash';
@@ -289,17 +290,17 @@ export class SimpleTrashService {
           throw new Error('لا يمكن استعادة عرض السعر - لم يتم العثور على السياق الأصلي');
         }
       } else if (originalCollection === 'tenderItems') {
-        // For tender items, restore them back to localStorage for the specific tender
+        // For tender items, restore them back to Firestore for the specific tender
         console.log('=== RESTORING TENDER ITEM ===');
         console.log('Tender context:', trashItem.tenderContext);
         
         const tenderId = trashItem.tenderContext?.tenderId || 'new';
         const storageKey = `tenderItems_${tenderId}`;
         
-        // Get existing tender items from localStorage
+        // Get existing tender items from Firestore
         let existingItems = [];
         try {
-          const stored = localStorage.getItem(storageKey);
+          const stored = await FirestorePendingDataService.getPendingData(storageKey);
           existingItems = stored ? JSON.parse(stored) : [];
         } catch (error) {
           console.warn('Error parsing existing tender items:', error);
@@ -325,23 +326,23 @@ export class SimpleTrashService {
           restoredFrom: 'trash'
         });
         
-        // Save back to localStorage
-        localStorage.setItem(storageKey, JSON.stringify(existingItems));
+        // Save back to Firestore
+        await FirestorePendingDataService.setPendingData(storageKey, existingItems);
         
         // Trigger data sync event for the tender page to refresh
-        localStorage.setItem('tenderItems_restored', Date.now().toString());
+        await FirestorePendingDataService.setPendingData('tenderItems_restored', Date.now().toString());
         window.dispatchEvent(new CustomEvent('tenderItemRestored', {
           detail: { tenderId, restoredItem: originalData }
         }));
         
-        console.log('Successfully restored tender item to localStorage:', {
+        console.log('Successfully restored tender item to Firestore session:', {
           tenderId,
           storageKey,
           itemCount: existingItems.length,
           restoredItem: originalData.materialName || originalData.name
         });
       } else if (originalCollection === 'tender_documents') {
-        // For tender documents, restore them back to localStorage for the specific tender
+        // For tender documents, restore them back to Firestore for the specific tender
         console.log('=== RESTORING TENDER DOCUMENT ===');
         console.log('Document data:', originalData);
         
@@ -350,12 +351,11 @@ export class SimpleTrashService {
         
         console.log('Restoring document to:', { tenderId, storageKey });
         
-        // Get existing tender documents from localStorage
+        // Get existing tender documents from Firestore
         let existingDocuments = [];
         try {
-          const stored = localStorage.getItem(storageKey);
-          existingDocuments = stored ? JSON.parse(stored) : [];
-          console.log('Existing documents in localStorage:', existingDocuments.length);
+          existingDocuments = await FirestorePendingDataService.getPendingData(storageKey) || [];
+          console.log('Existing documents in Firestore session:', existingDocuments.length);
         } catch (error) {
           console.warn('Error parsing existing tender documents:', error);
           existingDocuments = [];
@@ -393,18 +393,18 @@ export class SimpleTrashService {
           totalDocuments: existingDocuments.length
         });
         
-        // Save back to localStorage with error handling
+        // Save back to Firestore with error handling
         try {
-          localStorage.setItem(storageKey, JSON.stringify(existingDocuments));
-          console.log('✅ Successfully saved to localStorage:', storageKey);
+          await FirestorePendingDataService.setPendingData(storageKey, existingDocuments);
+          console.log('✅ Successfully saved to Firestore session:', storageKey);
         } catch (storageError) {
-          console.error('❌ Failed to save to localStorage:', storageError);
-          throw new Error('فشل في حفظ الملف المستعاد - مساحة التخزين ممتلئة');
+          console.error('❌ Failed to save to Firestore session:', storageError);
+          throw new Error('فشل في حفظ الملف المستعاد');
         }
         
         // Trigger storage event for the tender page to refresh
         try {
-          localStorage.setItem('tenderDocuments_restored', Date.now().toString());
+          await FirestorePendingDataService.setPendingData('tenderDocuments_restored', Date.now().toString());
           
           // Dispatch custom event for immediate update
           const restoreEvent = new CustomEvent('tenderDocumentRestored', {

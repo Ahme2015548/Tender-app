@@ -12,6 +12,16 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
+    // Special handling for reCAPTCHA errors - don't crash the app
+    if (error && error.message && error.message.includes('_getRecaptchaConfig')) {
+      console.log('🔧 [ErrorBoundary] Caught and ignored reCAPTCHA error:', error.message);
+      // Reset the error boundary to prevent UI crash
+      setTimeout(() => {
+        this.setState({ hasError: false, error: null, errorInfo: null });
+      }, 100);
+      return;
+    }
+
     // You can log the error to an error reporting service here
     console.error('ErrorBoundary caught an error:', error, errorInfo);
     this.setState({

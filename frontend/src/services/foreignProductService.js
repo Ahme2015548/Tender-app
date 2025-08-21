@@ -23,11 +23,11 @@ import { generateId, generateUUID, ENTITY_PREFIXES } from '../utils/idGenerator.
 
 const FOREIGN_PRODUCTS_COLLECTION = 'foreignproducts';
 
-// Helper function to trigger data sync across pages
+// Helper function to trigger data sync across pages (Firestore real-time)
 const triggerDataSync = () => {
-  localStorage.setItem('foreignProducts_updated', Date.now().toString());
   // Trigger custom event for same-page components
   window.dispatchEvent(new CustomEvent('foreignProductsUpdated'));
+  // Note: Firestore real-time listeners will handle cross-tab sync automatically
 };
 
 export class ForeignProductService {

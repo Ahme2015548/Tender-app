@@ -1,4 +1,5 @@
 import { useMemo, useCallback } from 'react';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 
 /**
  * Senior React Hook for Duplicate Prevention
@@ -6,21 +7,26 @@ import { useMemo, useCallback } from 'react';
  */
 export const useDuplicatePrevention = (storageKey) => {
   
-  // Memoized function to get existing items from storage
-  const getExistingItems = useCallback(() => {
+  // Memoized function to get existing items from Firestore
+  const getExistingItems = useCallback(async () => {
     try {
-      const items = JSON.parse(sessionStorage.getItem(storageKey) || '[]');
+      let items;
+      if (storageKey === 'pendingTenderItems') {
+        items = await FirestorePendingDataService.getPendingTenderItems() || [];
+      } else {
+        items = await FirestorePendingDataService.getPendingData(storageKey) || [];
+      }
       console.log(`🔍 HOOK: Retrieved ${items.length} existing items from ${storageKey}`);
       return Array.isArray(items) ? items : [];
     } catch (error) {
-      console.error('🚨 HOOK: Error parsing sessionStorage:', error);
+      console.error('🚨 HOOK: Error getting data from Firestore:', error);
       return [];
     }
   }, [storageKey]);
 
   // Function to get existing material IDs (not memoized to ensure fresh data)
-  const getExistingMaterialIds = useCallback(() => {
-    const existingItems = getExistingItems();
+  const getExistingMaterialIds = useCallback(async () => {
+    const existingItems = await getExistingItems();
     const ids = existingItems.map(item => {
       // Handle multiple possible ID fields
       return item.materialInternalId || item.internalId || item.id;
@@ -31,11 +37,11 @@ export const useDuplicatePrevention = (storageKey) => {
   }, [getExistingItems]);
 
   // Main duplicate check function
-  const checkForDuplicates = useCallback((itemsToCheck) => {
+  const checkForDuplicates = useCallback(async (itemsToCheck) => {
     console.log('🔍 HOOK: Starting duplicate check...');
     console.log('🔍 HOOK: Items to check:', itemsToCheck);
     
-    const existingIds = getExistingMaterialIds(); // Fixed: Added () to call the function
+    const existingIds = await getExistingMaterialIds();
     const duplicates = [];
     const unique = [];
 
@@ -75,7 +81,7 @@ export const useDuplicatePrevention = (storageKey) => {
   }, [getExistingMaterialIds]);
 
   // Advanced duplicate prevention with multiple strategies
-  const preventDuplicates = useCallback((itemsToCheck, options = {}) => {
+  const preventDuplicates = useCallback(async (itemsToCheck, options = {}) => {
     const {
       showError,
       errorTitle = 'بنود مكررة',
@@ -86,10 +92,10 @@ export const useDuplicatePrevention = (storageKey) => {
     console.log('🛡️ HOOK: Advanced duplicate prevention started...');
     
     // Strategy 1: Standard ID checking
-    const checkResult = checkForDuplicates(itemsToCheck);
+    const checkResult = await checkForDuplicates(itemsToCheck);
     
     // Strategy 2: Name-based checking (secondary prevention)
-    const existingItems = getExistingItems();
+    const existingItems = await getExistingItems();
     const existingNames = existingItems.map(item => (item.name || item.materialName || '').toLowerCase());
     
     const nameBasedDuplicates = itemsToCheck.filter(item => {

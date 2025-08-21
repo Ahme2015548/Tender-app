@@ -5,6 +5,7 @@ import { auth, db } from '../services/firebase';
 import CustomAlert from '../components/CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import ModernSpinner from '../components/ModernSpinner';
+import { userSettingsService } from '../services/UserSettingsService';
 import '../assets/css/login.css';
 
 const LoginPage = ({ onSignIn }) => {
@@ -26,14 +27,23 @@ const LoginPage = ({ onSignIn }) => {
     setAnimationClass('animate-in');
     
     // Check for remembered credentials
-    const rememberedEmail = localStorage.getItem('tender_remembered_email');
-    if (rememberedEmail) {
-      setFormData(prev => ({
-        ...prev,
-        email: rememberedEmail,
-        rememberMe: true
-      }));
-    }
+    const loadRememberedEmail = async () => {
+      try {
+        await userSettingsService.initialize();
+        const rememberedEmail = userSettingsService.getSetting('rememberedEmail');
+        if (rememberedEmail) {
+          setFormData(prev => ({
+            ...prev,
+            email: rememberedEmail,
+            rememberMe: true
+          }));
+        }
+      } catch (error) {
+        console.error('Error loading remembered email:', error);
+      }
+    };
+    
+    loadRememberedEmail();
   }, []);
 
   const handleChange = (e) => {
@@ -73,7 +83,8 @@ const LoginPage = ({ onSignIn }) => {
 
   const checkEmployeeStatus = async (uid) => {
     try {
-      const employeeDoc = await getDoc(doc(db, 'employees', uid));
+      const employeeDocRef = doc(db, 'employees', uid);
+      const employeeDoc = await getDoc(employeeDocRef);
       
       if (!employeeDoc.exists()) {
         throw new Error('لا يوجد حساب موظف مرتبط بهذا البريد الإلكتروني');
@@ -86,11 +97,15 @@ const LoginPage = ({ onSignIn }) => {
       }
 
       // Update login tracking
-      await updateDoc(doc(db, 'employees', uid), {
-        lastLoginAt: serverTimestamp(),
-        loginCount: increment(1),
-        updatedAt: serverTimestamp()
-      });
+      try {
+        await updateDoc(doc(db, 'employees', uid), {
+          lastLoginAt: serverTimestamp(),
+          loginCount: increment(1),
+          updatedAt: serverTimestamp()
+        });
+      } catch (updateError) {
+        console.log('Login tracking update failed:', updateError);
+      }
 
       return employeeData;
     } catch (error) {
@@ -121,9 +136,9 @@ const LoginPage = ({ onSignIn }) => {
 
       // Handle remember me
       if (formData.rememberMe) {
-        localStorage.setItem('tender_remembered_email', formData.email.trim());
+        await userSettingsService.setSetting('rememberedEmail', formData.email.trim());
       } else {
-        localStorage.removeItem('tender_remembered_email');
+        await userSettingsService.removeSetting('rememberedEmail');
       }
 
       console.log('✅ Sign-in successful:', {
@@ -135,14 +150,13 @@ const LoginPage = ({ onSignIn }) => {
 
       showSuccess(`مرحباً بك، ${employeeData.fullName}`, 'تم تسجيل الدخول بنجاح');
 
-      // AuthContext will automatically handle the transition to dashboard
-      // No need for manual callback - the auth state change will trigger the route change
-      console.log('🚀 Login successful - AuthContext will handle navigation');
-      
-      // Small delay to let the success message show, then AuthContext takes over
-      setTimeout(() => {
-        console.log('✅ Login process complete - waiting for auth state change');
-      }, 1000);
+      // Call the onSignIn callback if provided
+      if (onSignIn) {
+        onSignIn({
+          user: userCredential.user,
+          employee: employeeData
+        });
+      }
 
     } catch (error) {
       console.error('Sign-in error:', error);

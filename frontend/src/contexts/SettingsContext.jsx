@@ -306,11 +306,11 @@ export const SettingsProvider = ({ children }) => {
   // 🔄 Force refresh function for manual updates
   const forceRefresh = useCallback(() => {
     console.log('🔄 Force refreshing settings...');
-    localStorage.setItem('settings_force_refresh', Date.now().toString());
-    window.dispatchEvent(new StorageEvent('storage', {
-      key: 'settings_force_refresh',
-      newValue: Date.now().toString()
-    }));
+    // Use custom event instead of localStorage for cross-tab communication
+    const refreshEvent = new CustomEvent('settings_force_refresh', {
+      detail: { timestamp: Date.now() }
+    });
+    window.dispatchEvent(refreshEvent);
   }, []);
 
   // Context value with all state and helpers

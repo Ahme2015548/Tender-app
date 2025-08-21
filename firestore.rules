@@ -1,0 +1,181 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to check if user owns the document
+    function isOwner() {
+      return isAuthenticated() && resource.data.ownerId == request.auth.uid;
+    }
+    
+    // Helper function to check if user owns the document being created
+    function isOwnerOnCreate() {
+      return isAuthenticated() && request.resource.data.ownerId == request.auth.uid;
+    }
+
+    // Tenders - user can only access their own tenders
+    match /tenders/{tenderId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Tender Items - user can only access their own tender items
+    match /tenderItems/{itemId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Documents - user can only access their own documents
+    match /documents/{documentId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Tender Documents - user can only access their own tender documents
+    match /tender_documents/{documentId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.uploadedBy == request.auth.uid) &&
+        (request.resource == null || request.resource.data.uploadedBy == request.auth.uid);
+    }
+
+    // Pending Data - user can only access their own pending data
+    match /pendingData/{dataId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Suppliers - user can only access their own suppliers
+    match /suppliers/{supplierId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Customers - user can only access their own customers
+    match /customers/{customerId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Raw Materials - user can only access their own raw materials
+    match /rawMaterials/{materialId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Local Products - user can only access their own local products
+    match /localProducts/{productId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Foreign Products - user can only access their own foreign products
+    match /foreignProducts/{productId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Foreign Suppliers - user can only access their own foreign suppliers
+    match /foreignSuppliers/{supplierId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Manufactured Products - user can only access their own manufactured products
+    match /manufacturedProducts/{productId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Employees - user can only access their own employee data
+    match /employees/{employeeId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Employee Documents - user can only access their own employee documents
+    match /employee_documents/{documentId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Price Quotes - user can only access their own price quotes
+    match /priceQuotes/{quoteId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // User Settings - user can only access their own settings
+    match /usersettings/{userId} {
+      allow read, write: if isAuthenticated() && userId == request.auth.uid;
+    }
+
+    // Activity Logs - user can only access their own activity logs
+    match /activityLogs/{logId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Trash - user can only access their own trash items
+    match /trash/{trashId} {
+      allow read, write: if isAuthenticated() && 
+        (resource == null || resource.data.ownerId == request.auth.uid) &&
+        (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    // Global Settings (categories, units) - read-only for authenticated users
+    match /categories/{categoryId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Only admins can modify (implement admin check if needed)
+    }
+
+    match /units/{unitId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Only admins can modify (implement admin check if needed)
+    }
+
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+// Firebase Storage rules for documents
+// Note: This goes in storage.rules, not firestore.rules
+/*
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Tender documents - user can only access their own files
+    match /tender-documents/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Other file types - user can only access their own files
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null && 
+        request.auth.uid == resource.metadata.ownerId;
+    }
+  }
+}
+*/

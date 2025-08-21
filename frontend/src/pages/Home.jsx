@@ -17,7 +17,7 @@ function HomeContent() {
 
   return (
     <div className={`page-wrapper ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-      <Header onToggle={handleToggle} />
+          <Header onToggle={handleToggle} />
       
       <div className="main-container" style={{
         paddingRight: sidebarCollapsed ? '72px' : '250px',
@@ -41,7 +41,7 @@ function HomeContent() {
         
         <div className="app-container">
           {/* Breadcrumb Section */}
-          <div className="app-hero-header d-flex align-items-center px-3 py-2 border-top">
+          <div className="app-hero-header d-flex align-items-center px-3 py-2">
             <ol className="breadcrumb m-0">
               <li className="breadcrumb-item">
                 <a href="/" className="text-decoration-none d-flex align-items-center">

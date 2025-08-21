@@ -6,13 +6,14 @@ import SidebarButtons from '../components/SidebarButtons';
 import SimpleActivityTimeline from '../components/SimpleActivityTimeline';
 import ManualActivityCreator from '../components/ManualActivityCreator';
 import { RawMaterialService } from '../services/rawMaterialService';
-import { TenderItemsService } from '../services/TenderItemsService';
+import { TenderItemsServiceNew } from '../services/TenderItemsServiceNew';
 import { useActivity } from '../components/ActivityManager';
 import { ActivityProvider, AutoActivityTracker } from '../components/ActivityManager';
 import ModernSpinner from '../components/ModernSpinner';
 import CustomAlert from '../components/CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 
 function RawMaterialTenderContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -41,9 +42,10 @@ function RawMaterialTenderContent() {
     
     // Listen for storage events to sync data changes from other pages
     const handleStorageChange = (e) => {
-      if (e.key === 'rawMaterials_updated') {
+      // Firestore real-time listeners handle data sync automatically
+      // Keeping event listener for custom events only
+      if (e.type === 'rawMaterialsUpdated') {
         loadRawMaterials();
-        localStorage.removeItem('rawMaterials_updated');
       }
     };
     
@@ -113,7 +115,7 @@ function RawMaterialTenderContent() {
     }
   };
 
-  const handleAddSelectedMaterials = () => {
+  const handleAddSelectedMaterials = async () => {
     if (selectedMaterials.length === 0) {
       showError('يرجى اختيار مادة خام واحدة على الأقل', 'لا توجد مواد مختارة');
       return;
@@ -151,10 +153,11 @@ function RawMaterialTenderContent() {
   };
 
   const handleQuantityChange = (itemId, newQuantity) => {
-    const quantity = Math.max(1, parseInt(newQuantity) || 1);
+    // Allow any positive number for manual input, no restrictions
+    const quantity = Math.max(0, parseFloat(newQuantity) || 0);
     setModalItems(prev => prev.map(item => 
       item.id === itemId 
-        ? { ...item, quantity, totalPrice: item.unitPrice * quantity }
+        ? { ...item, quantity: Number(quantity.toFixed(1)), totalPrice: item.unitPrice * Number(quantity.toFixed(1)) }
         : item
     ));
   };
@@ -176,8 +179,26 @@ function RawMaterialTenderContent() {
         id: item.id
       })));
       
-      // Check for duplicates in existing pendingTenderItems BEFORE creating new items
-      const existingItemsForDuplicateCheck = JSON.parse(sessionStorage.getItem('pendingTenderItems') || '[]');
+      // 🔧 FIX: Check for duplicates in BOTH pending items AND existing tender items (for edit mode)
+      let existingItemsForDuplicateCheck = await FirestorePendingDataService.getPendingTenderItems() || [];
+      
+      // If we're in edit mode (tenderId exists), also get existing items from the tender document
+      if (tenderId && tenderId !== 'new') {
+        try {
+          console.log('🎯 EDIT MODE: Loading existing tender items for duplicate check, tender ID:', tenderId);
+          const { tenderServiceNew } = await import('../services/TenderServiceNew');
+          const tender = await tenderServiceNew.getById(tenderId);
+          
+          if (tender && tender.items && Array.isArray(tender.items)) {
+            console.log('📦 EDIT MODE: Found existing tender items:', tender.items.length);
+            // Merge existing tender items with any pending items
+            existingItemsForDuplicateCheck = [...existingItemsForDuplicateCheck, ...tender.items];
+          }
+        } catch (error) {
+          console.error('❌ Error loading existing tender items for duplicate check:', error);
+        }
+      }
+      
       console.log('🔍 STEP 2: Retrieved existing items from storage:', {
         count: existingItemsForDuplicateCheck.length,
         items: existingItemsForDuplicateCheck.map(item => ({
@@ -194,23 +215,35 @@ function RawMaterialTenderContent() {
       ).filter(Boolean);
       console.log('🔍 STEP 3: Extracted existing material IDs:', existingMaterialIds);
       
+      // 🚨 FIRST: Check for duplicates WITHOUT creating any arrays yet
       const duplicateItems = [];
-      const uniqueModalItems = modalItems.filter(item => {
-        // 🛡️ FIXED: Check multiple ID fields to ensure we catch duplicates
-        const itemId = item.internalId || item.id;
-        const isDuplicate = existingMaterialIds.includes(itemId);
-        console.log(`🔍 STEP 4: Duplicate check for "${item.name}" (ID: ${itemId}) - Is Duplicate: ${isDuplicate}`);
+      
+      for (const item of modalItems) {
+        // 🛡️ FIXED: Check ALL possible ID fields to ensure we catch duplicates
+        const possibleIds = [
+          item.internalId,
+          item.id,
+          item.materialInternalId,
+          item.materialId
+        ].filter(Boolean);
+        
+        // Check if ANY of the possible IDs match existing items
+        const isDuplicate = possibleIds.some(id => existingMaterialIds.includes(id));
+        
+        console.log(`🔍 STEP 4: Duplicate check for "${item.name}":`);
+        console.log(`  - Possible IDs: [${possibleIds.join(', ')}]`);
+        console.log(`  - Existing IDs: [${existingMaterialIds.join(', ')}]`);
+        console.log(`  - Is Duplicate: ${isDuplicate}`);
+        
         if (isDuplicate) {
           duplicateItems.push(item.name);
-          console.log(`🚨 DUPLICATE FOUND: "${item.name}" with ID ${itemId} already exists!`);
+          console.log(`🚨 DUPLICATE FOUND: "${item.name}" with IDs [${possibleIds.join(', ')}] matches existing items!`);
         }
-        return !isDuplicate;
-      });
+      }
 
       console.log('🔍 STEP 5: Duplicate prevention analysis complete:', {
         totalModalItems: modalItems.length,
         duplicatesFound: duplicateItems.length,
-        uniqueItems: uniqueModalItems.length,
         duplicateNames: duplicateItems,
         existingIds: existingMaterialIds
       });
@@ -242,35 +275,30 @@ function RawMaterialTenderContent() {
       console.log('✅ STEP 8: NO DUPLICATES DETECTED - Safe to proceed');
       console.log('✅ Continuing with item creation process...');
       
-      // Create proper tender items with ID-based relationships
+      // 🎯 NOW SAFE: Create uniqueModalItems since no duplicates were found
+      const uniqueModalItems = modalItems;
+      
+      // Create tender items directly with all required fields (EXACT CLONE from ForeignProductTender)
       const tenderItems = [];
       
       for (const item of uniqueModalItems) {
         try {
-          // Create tender item using proper service with material relationship
-          let tenderItem;
-          try {
-            tenderItem = await TenderItemsService.createTenderItem({
-              materialInternalId: item.internalId,
-              materialType: 'rawMaterial',
-              quantity: item.quantity || 1,
-              tenderId: tenderId === 'new' ? 'new' : tenderId
-            });
-          } catch (createError) {
-            console.warn('⚠️ Full creation failed, using simple method:', createError.message);
-            // Fallback to simple creation with current item data
-            tenderItem = await TenderItemsService.createTenderItemSimple({
-              materialInternalId: item.internalId,
-              materialType: 'rawMaterial',
-              materialName: item.name,
-              materialCategory: item.category,
-              materialUnit: item.unit,
-              quantity: item.quantity || 1,
-              unitPrice: item.price || 0,
-              tenderId: tenderId === 'new' ? 'new' : tenderId,
-              supplierInfo: item.supplier || ''
-            });
-          }
+          // Create tender item directly with all required fields
+          const tenderItem = {
+            internalId: `ti_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            materialInternalId: item.internalId,
+            materialType: 'rawMaterial',
+            materialName: item.name,
+            materialCategory: item.category || '',
+            materialUnit: item.unit || 'قطعة',
+            quantity: item.quantity || 1,
+            unitPrice: item.unitPrice || item.price || 0,
+            totalPrice: (item.quantity || 1) * (item.unitPrice || item.price || 0),
+            supplierInfo: item.displaySupplier || item.supplier || '',
+            tenderId: tenderId === 'new' ? 'new' : tenderId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
           
           tenderItems.push(tenderItem);
           
@@ -290,15 +318,14 @@ function RawMaterialTenderContent() {
       }
       
       // Get existing items and merge with new items (duplicates already filtered out)
-      const existingItemsStorage = sessionStorage.getItem('pendingTenderItems');
+      const existingItems = await FirestorePendingDataService.getPendingTenderItems() || [];
       let allItems = [...tenderItems]; // Start with new items
       
-      if (existingItemsStorage) {
+      if (existingItems.length > 0) {
         try {
-          const parsedExistingItems = JSON.parse(existingItemsStorage);
-          if (Array.isArray(parsedExistingItems)) {
+          if (Array.isArray(existingItems)) {
             // Refresh pricing for existing items before merging
-            const refreshedExistingItems = await TenderItemsService.refreshTenderItemsPricing(parsedExistingItems);
+            const refreshedExistingItems = await TenderItemsServiceNew.refreshTenderItemsPricing(existingItems);
             
             // ✅ SAFE MERGE: Duplicates already prevented above, no need for additional filtering
             console.log('🔄 SAFE MERGE: Our enhanced duplicate prevention handled conflicts, merging safely');
@@ -328,7 +355,7 @@ function RawMaterialTenderContent() {
         }))
       });
       
-      sessionStorage.setItem('pendingTenderItems', JSON.stringify(allItems));
+      await FirestorePendingDataService.setPendingTenderItems(allItems);
 
       // Log activity
       try {
@@ -340,22 +367,36 @@ function RawMaterialTenderContent() {
         console.error('Failed to log activity:', logError);
       }
       
+      // Items added - manual confirmation will be shown on AddTender page
+      
+      // Dispatch custom event to notify AddTender page
+      window.dispatchEvent(new CustomEvent('tenderItemsAdded', {
+        detail: {
+          count: tenderItems.length,
+          type: 'rawMaterial',
+          items: tenderItems
+        }
+      }));
+      
       // Show success message
-      showSuccess(`تم إضافة ${tenderItems.length} مادة خام للمناقصة مع ربط الأسعار الديناميكي`, 'تمت الإضافة');
+      showSuccess(
+        `تم إضافة ${tenderItems.length} مادة خام بنجاح إلى قائمة المناقصة`,
+        'نجحت العملية'
+      );
       
       // Close modal and navigate back to AddTender
       setShowQuantityModal(false);
       setModalItems([]);
-      setDuplicateWarning(null); // Clear warning on success
+      setDuplicateWarning(null);
       
-      // Navigate back to AddTender page with a slight delay
+      // Navigate back to AddTender page with delay to show success message
       setTimeout(() => {
         if (tenderId === 'new') {
           navigate('/tenders/add');
         } else {
           navigate(`/tenders/edit/${tenderId}`);
         }
-      }, 100);
+      }, 2000); // 2 seconds to show success message
       
     } catch (error) {
       console.error('Error in handleConfirmQuantities:', error);
@@ -404,7 +445,7 @@ function RawMaterialTenderContent() {
   return (
     <>
       <div className={`page-wrapper ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-        <Header onToggle={handleToggle} />
+          <Header onToggle={handleToggle} />
         
         <div className="main-container" style={{
           paddingRight: sidebarCollapsed ? '72px' : '250px',
@@ -725,8 +766,8 @@ function RawMaterialTenderContent() {
                               <button 
                                 type="button" 
                                 className="btn btn-outline-secondary btn-sm"
-                                onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
-                                disabled={item.quantity <= 1}
+                                onClick={() => handleQuantityChange(item.id, Math.max(0, Number((item.quantity - 0.1).toFixed(1))))}
+                                disabled={item.quantity <= 0}
                                 style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                               >
                                 <i className="bi bi-dash"></i>
@@ -736,13 +777,19 @@ function RawMaterialTenderContent() {
                                 className="form-control text-center mx-2"
                                 style={{ width: '80px', height: '32px', borderRadius: '6px' }}
                                 value={item.quantity}
-                                min="1"
+                                min="0"
+                                step="any"
                                 onChange={(e) => handleQuantityChange(item.id, e.target.value)}
+                                onBlur={(e) => {
+                                  // Format to 1 decimal place when user finishes editing
+                                  const formattedValue = Number(e.target.value || 0).toFixed(1);
+                                  handleQuantityChange(item.id, formattedValue);
+                                }}
                               />
                               <button 
                                 type="button" 
                                 className="btn btn-outline-secondary btn-sm"
-                                onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                                onClick={() => handleQuantityChange(item.id, Number((item.quantity + 0.1).toFixed(1)))}
                                 style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                               >
                                 <i className="bi bi-plus"></i>
@@ -759,7 +806,7 @@ function RawMaterialTenderContent() {
                               {Math.round(item.totalPrice)} ريال
                             </div>
                             <small className="text-success">
-                              ({item.quantity} × {Math.round(item.unitPrice)})
+                              ({item.quantity.toFixed(1)} × {Math.round(item.unitPrice)})
                             </small>
                           </td>
                         </tr>
@@ -777,7 +824,7 @@ function RawMaterialTenderContent() {
                       {getTotalModalPrice()} ريال
                     </span>
                     <span className="badge bg-info ms-2">
-                      {modalItems.reduce((total, item) => total + item.quantity, 0)} قطعة
+                      {modalItems.reduce((total, item) => total + item.quantity, 0).toFixed(1)} قطعة
                     </span>
                   </div>
                   <div className="d-flex gap-2">

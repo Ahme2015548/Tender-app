@@ -112,7 +112,7 @@ function EmployeesContent() {
 
   return (
     <div className={`page-wrapper ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} dir="rtl">
-      <Header onToggle={handleToggle} />
+          <Header onToggle={handleToggle} />
       
       <div className="main-container" style={{
         paddingRight: sidebarCollapsed ? '72px' : '250px',

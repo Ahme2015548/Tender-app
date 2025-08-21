@@ -15,8 +15,8 @@ import { signInAnonymously } from 'firebase/auth';
 import { db, auth } from './firebase.js';
 
 /**
- * Hybrid service that supplements localStorage with Firebase persistence
- * Keeps existing localStorage functionality working while adding Firebase sync
+ * Hybrid service for Firebase persistence with anonymous authentication
+ * Provides Firebase sync capabilities for tender items
  */
 export class HybridTenderService {
   
@@ -39,7 +39,7 @@ export class HybridTenderService {
   }
   
   /**
-   * Save tender items to Firebase (supplements localStorage)
+   * Save tender items to Firebase with anonymous auth
    * @param {string} tenderId - Tender ID
    * @param {Array} items - Tender items array
    */
@@ -86,12 +86,12 @@ export class HybridTenderService {
       
     } catch (error) {
       console.error('❌ [HYBRID] Error saving tender items to Firebase:', error);
-      // Don't throw - let localStorage continue working
+      // Don't throw - allow graceful degradation
     }
   }
   
   /**
-   * Load tender items from Firebase (supplements localStorage)
+   * Load tender items from Firebase with anonymous auth
    * @param {string} tenderId - Tender ID  
    * @returns {Array} Array of tender items
    */

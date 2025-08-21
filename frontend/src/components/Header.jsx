@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useCustomAlert } from '../hooks/useCustomAlert';
@@ -6,6 +7,7 @@ import CustomAlert from './CustomAlert';
 import './Header.scss';
 
 export default function Header({ onToggle }) {
+  const navigate = useNavigate();
   const { isTimelineVisible, toggleTimeline } = useActivityTimeline();
   const { signOut, employeeData } = useAuth();
   const { alertConfig, closeAlert, showConfirm } = useCustomAlert();
@@ -28,9 +30,10 @@ export default function Header({ onToggle }) {
   return (
     <>
       <div className="app-header-wrapper">
-        <div className="app-header d-flex align-items-center px-3">
+        <div className="app-header d-flex align-items-center justify-content-between px-3">
           
-          <div className="d-flex align-items-end">
+          {/* Left side - Menu Toggle and Logo */}
+          <div className="d-flex align-items-center">
             <button 
               onClick={onToggle}
               type="button"
@@ -52,13 +55,13 @@ export default function Header({ onToggle }) {
             
             <div className="app-brand py-2" style={{ marginTop: '-8px', marginRight: '-20px' }}>
               <a href="/" className="d-sm-block d-none">
-                <img src="/assets/images/logo.svg" className="logo" alt="Modern Bin" style={{
+                <img src="/Tender-app/images/logo.svg" className="logo" alt="Modern Bin" style={{
                   height: '40px',
                   width: 'auto'
                 }} />
               </a>
               <a href="/" className="d-sm-none d-block">
-                <img src="/assets/images/logo-sm.svg" className="logo" alt="Modern Bin" style={{
+                <img src="/Tender-app/images/logo-sm.svg" className="logo" alt="Modern Bin" style={{
                   height: '40px',
                   width: 'auto'
                 }} />
@@ -66,7 +69,52 @@ export default function Header({ onToggle }) {
             </div>
           </div>
 
-          <div className="header-actions col d-lg-flex d-none">
+          {/* Right side - Settings, Activity Timeline, Logout, and Trash icons */}
+          <div className="header-actions d-lg-flex d-none">
+            {/* Settings Icon */}
+            <div className="settings-icon-container d-flex align-items-center me-3">
+              <button
+                onClick={() => navigate('/settings')}
+                className="d-flex align-items-center justify-content-center position-relative"
+                style={{
+                  width: '48px',
+                  height: '48px',
+                  background: 'linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%)',
+                  borderRadius: '12px',
+                  color: '#6c757d',
+                  border: 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
+                }}
+                onMouseOver={(e) => {
+                  const link = e.currentTarget;
+                  const icon = link.querySelector('i');
+                  link.style.background = 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)';
+                  link.style.color = 'white';
+                  link.style.transform = 'translateY(-2px)';
+                  link.style.boxShadow = '0 4px 15px rgba(0, 123, 255, 0.4)';
+                  if (icon) {
+                    icon.style.setProperty('color', 'white', 'important');
+                  }
+                }}
+                onMouseOut={(e) => {
+                  const link = e.currentTarget;
+                  const icon = link.querySelector('i');
+                  link.style.background = 'linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%)';
+                  link.style.color = '#6c757d';
+                  link.style.transform = 'translateY(0)';
+                  link.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.1)';
+                  if (icon) {
+                    icon.style.setProperty('color', '#6c757d', 'important');
+                  }
+                }}
+                title="الإعدادات"
+              >
+                <i className="bi bi-gear fs-5 lh-1" style={{ color: 'inherit' }} />
+              </button>
+            </div>
+
             {/* Activity Timeline Toggle Button */}
             <div className="activity-toggle-container d-flex align-items-center me-3">
               <button 
@@ -97,93 +145,6 @@ export default function Header({ onToggle }) {
               >
                 <i className={`bi ${isTimelineVisible ? 'bi-clock-history' : 'bi-clock'} fs-5 lh-1`} />
               </button>
-            </div>
-
-            {/* Settings Icon */}
-            <div className="settings-icon-container d-flex align-items-center me-3">
-              <a
-                href="/settings" 
-                className="d-flex align-items-center justify-content-center position-relative"
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  background: 'linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%)',
-                  borderRadius: '12px',
-                  color: '#6c757d',
-                  textDecoration: 'none',
-                  transition: 'all 0.3s ease',
-                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
-                }}
-                onMouseOver={(e) => {
-                  const link = e.currentTarget;
-                  const icon = link.querySelector('i');
-                  link.style.background = 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)';
-                  link.style.color = 'white';
-                  link.style.transform = 'translateY(-2px)';
-                  link.style.boxShadow = '0 4px 15px rgba(0, 123, 255, 0.4)';
-                  if (icon) {
-                    icon.style.setProperty('color', 'white', 'important');
-                  }
-                }}
-                onMouseOut={(e) => {
-                  const link = e.currentTarget;
-                  const icon = link.querySelector('i');
-                  link.style.background = 'linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%)';
-                  link.style.color = '#6c757d';
-                  link.style.transform = 'translateY(0)';
-                  link.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.1)';
-                  if (icon) {
-                    icon.style.setProperty('color', '#6c757d', 'important');
-                  }
-                }}
-                title="الإعدادات"
-              >
-                <i className="bi bi-gear fs-5 lh-1" style={{ color: 'inherit' }} />
-              </a>
-            </div>
-
-            {/* Trash Icon - Left Side */}
-            <div className="trash-icon-container d-flex align-items-center me-3">
-              <a 
-                href="/trash" 
-                className="d-flex align-items-center justify-content-center position-relative"
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  background: 'linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%)',
-                  borderRadius: '12px',
-                  color: '#6c757d',
-                  textDecoration: 'none',
-                  transition: 'all 0.3s ease',
-                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-                  border: 'none'
-                }}
-                onMouseOver={(e) => {
-                  const link = e.currentTarget;
-                  const icon = link.querySelector('i');
-                  link.style.background = 'linear-gradient(135deg, #dc3545 0%, #c82333 100%)';
-                  link.style.color = 'white';
-                  link.style.transform = 'translateY(-2px)';
-                  link.style.boxShadow = '0 4px 15px rgba(220, 53, 69, 0.4)';
-                  if (icon) {
-                    icon.style.setProperty('color', 'white', 'important');
-                  }
-                }}
-                onMouseOut={(e) => {
-                  const link = e.currentTarget;
-                  const icon = link.querySelector('i');
-                  link.style.background = 'linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%)';
-                  link.style.color = '#6c757d';
-                  link.style.transform = 'translateY(0)';
-                  link.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.1)';
-                  if (icon) {
-                    icon.style.setProperty('color', '#6c757d', 'important');
-                  }
-                }}
-                title="سلة المهملات"
-              >
-                <i className="bi bi-trash fs-5 lh-1" style={{ color: 'inherit' }} />
-              </a>
             </div>
 
             {/* Logout Button */}
@@ -229,11 +190,57 @@ export default function Header({ onToggle }) {
                 <i className="bi bi-box-arrow-right fs-5 lh-1" style={{ color: 'inherit' }} />
               </button>
             </div>
+
+            {/* Trash Icon */}
+            <div className="trash-icon-container d-flex align-items-center me-3">
+              <button 
+                onClick={() => navigate('/trash')}
+                className="d-flex align-items-center justify-content-center position-relative"
+                style={{
+                  width: '48px',
+                  height: '48px',
+                  background: 'linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%)',
+                  borderRadius: '12px',
+                  color: '#6c757d',
+                  border: 'none',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
+                }}
+                onMouseOver={(e) => {
+                  const link = e.currentTarget;
+                  const icon = link.querySelector('i');
+                  link.style.background = 'linear-gradient(135deg, #dc3545 0%, #c82333 100%)';
+                  link.style.color = 'white';
+                  link.style.transform = 'translateY(-2px)';
+                  link.style.boxShadow = '0 4px 15px rgba(220, 53, 69, 0.4)';
+                  if (icon) {
+                    icon.style.setProperty('color', 'white', 'important');
+                  }
+                }}
+                onMouseOut={(e) => {
+                  const link = e.currentTarget;
+                  const icon = link.querySelector('i');
+                  link.style.background = 'linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%)';
+                  link.style.color = '#6c757d';
+                  link.style.transform = 'translateY(0)';
+                  link.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.1)';
+                  if (icon) {
+                    icon.style.setProperty('color', '#6c757d', 'important');
+                  }
+                }}
+                title="سلة المهملات"
+              >
+                <i className="bi bi-trash fs-5 lh-1" style={{ color: 'inherit' }} />
+              </button>
+            </div>
           </div>
 
-          <div className="dropdown ms-2">
+          {/* Right side - User Dropdown only */}
+          <div className="d-flex align-items-center">
+            <div className="dropdown ms-2">
             <a className="dropdown-toggle d-flex py-2 align-items-center text-decoration-none" href="#!" role="button" data-bs-toggle="dropdown">
-              <img src="/assets/images/user.png" className="rounded-2 img-3x" alt="User" />
+              <img src="/Tender-app/images/user.png" className="rounded-2 img-3x" alt="User" />
               <span className="ms-2 text-truncate d-lg-block d-none">
                 {employeeData?.fullName || 'المستخدم'}
               </span>
@@ -251,6 +258,7 @@ export default function Header({ onToggle }) {
                 </button>
               </div>
             </div>
+          </div>
           </div>
         </div>
       </div>

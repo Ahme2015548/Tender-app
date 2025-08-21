@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, memo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import SidebarButtons from '../components/SidebarButtons';
@@ -7,6 +8,7 @@ import ManualActivityCreator from '../components/ManualActivityCreator';
 import { ActivityProvider, AutoActivityTracker } from '../components/ActivityManager';
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
 import { useDragAndDrop } from '../hooks/useDragAndDrop';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 import '../assets/css/kanban.css';
 
 // Constants for better maintainability
@@ -334,10 +336,29 @@ function TenderTrackingContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { isTimelineVisible } = useActivityTimeline();
   const [kanbanData, setKanbanData] = useState(INITIAL_KANBAN_DATA);
+  const navigate = useNavigate();
 
   const handleToggle = useCallback(() => {
     setSidebarCollapsed(prev => !prev);
   }, []);
+
+  const handleAddTender = async () => {
+    try {
+      // Clear all pending data to start completely fresh
+      await FirestorePendingDataService.clearPendingData('tenderFormData_new');
+      await FirestorePendingDataService.clearPendingData('tenderDocuments_new'); 
+      await FirestorePendingDataService.clearPendingTenderItems();
+      
+      console.log('✅ [TRACKING] All pending data cleared - navigating to fresh Add Tender form');
+      
+      // Navigate to add tender page
+      navigate('/tenders/add');
+    } catch (error) {
+      console.error('❌ [TRACKING] Error clearing pending data:', error);
+      // Navigate anyway even if clearing fails
+      navigate('/tenders/add');
+    }
+  };
 
   // Optimized move card handler with stable updates - newest cards at top
   const handleMoveCard = useCallback((updatedItem, sourceStage, targetStage) => {
@@ -385,7 +406,7 @@ function TenderTrackingContent() {
 
   return (
     <div className={`page-wrapper ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} dir="rtl">
-      <Header onToggle={handleToggle} />
+          <Header onToggle={handleToggle} />
       
       <div className="main-container" style={containerStyles}>
         
@@ -443,6 +464,7 @@ function TenderTrackingContent() {
                       </button>
                       <button 
                         className="btn btn-primary"
+                        onClick={handleAddTender}
                         style={{ 
                           height: '32px', 
                           fontSize: '14px',

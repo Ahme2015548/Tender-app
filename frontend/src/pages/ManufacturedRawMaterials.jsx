@@ -6,14 +6,14 @@ import SidebarButtons from '../components/SidebarButtons';
 import SimpleActivityTimeline from '../components/SimpleActivityTimeline';
 import ManualActivityCreator from '../components/ManualActivityCreator';
 import { RawMaterialService } from '../services/rawMaterialService';
-import { TenderItemsService } from '../services/TenderItemsService';
+import { TenderItemsServiceNew } from '../services/TenderItemsServiceNew';
 import { useActivity } from '../components/ActivityManager';
 import { ActivityProvider, AutoActivityTracker } from '../components/ActivityManager';
 import ModernSpinner from '../components/ModernSpinner';
 import CustomAlert from '../components/CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
-import { useDuplicatePrevention } from '../hooks/useDuplicatePrevention';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 
 function ManufacturedRawMaterialsContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -32,8 +32,83 @@ function ManufacturedRawMaterialsContent() {
   const { logActivity, getCurrentUser } = useActivity();
   const { alertConfig, closeAlert, showSuccess, showError } = useCustomAlert();
   
-  // Senior React Hook for comprehensive duplicate prevention
-  const { preventDuplicates } = useDuplicatePrevention('pendingProductItems');
+  // REAL duplicate prevention - check against existing product items
+  const preventDuplicates = async (items, options = {}) => {
+    try {
+      console.log('🔍 DUPLICATE CHECK: Checking', items.length, 'items against existing product items');
+      
+      // Get existing product items from pending data
+      const existingItems = await FirestorePendingDataService.getPendingProductItems() || [];
+      console.log('🔍 DUPLICATE CHECK: Found', existingItems.length, 'existing items');
+      
+      if (existingItems.length === 0) {
+        console.log('✅ DUPLICATE CHECK: No existing items, all items are unique');
+        return {
+          success: true,
+          uniqueItems: items || []
+        };
+      }
+      
+      // Check for duplicates
+      const duplicates = [];
+      const uniqueItems = [];
+      
+      for (const newItem of items) {
+        const newItemId = newItem.materialInternalId || newItem.internalId || newItem.id;
+        const newItemName = (newItem.materialName || newItem.name || '').trim().toLowerCase();
+        
+        // Check if this item already exists
+        const isDuplicate = existingItems.some(existingItem => {
+          const existingId = existingItem.materialInternalId || existingItem.internalId || existingItem.id;
+          const existingName = (existingItem.materialName || existingItem.name || '').trim().toLowerCase();
+          
+          return (newItemId && existingId && newItemId === existingId) || 
+                 (newItemName && existingName && newItemName === existingName);
+        });
+        
+        if (isDuplicate) {
+          duplicates.push(newItem);
+          console.log('🚨 DUPLICATE FOUND:', newItem.materialName || newItem.name);
+        } else {
+          uniqueItems.push(newItem);
+          console.log('✅ UNIQUE ITEM:', newItem.materialName || newItem.name);
+        }
+      }
+      
+      if (duplicates.length > 0 && options.showError) {
+        const duplicateNames = duplicates.map(item => item.materialName || item.name).join('، ');
+        options.showError(
+          `تم العثور على ${duplicates.length} بند مكرر: ${duplicateNames}. لن يتم إضافة البنود المكررة.`,
+          options.errorTitle || 'بنود مكررة'
+        );
+        
+        if (options.stopOnDuplicates && uniqueItems.length === 0) {
+          return {
+            success: false,
+            uniqueItems: []
+          };
+        }
+      }
+      
+      console.log('🔍 DUPLICATE CHECK RESULT:', {
+        totalItems: items.length,
+        duplicates: duplicates.length,
+        uniqueItems: uniqueItems.length
+      });
+      
+      return {
+        success: true,
+        uniqueItems: uniqueItems
+      };
+      
+    } catch (error) {
+      console.error('❌ Error in duplicate prevention:', error);
+      return {
+        success: true,
+        uniqueItems: items || [] // Fallback: allow all items if check fails
+      };
+    }
+  };
 
   const handleToggle = () => {
     setSidebarCollapsed(!sidebarCollapsed);
@@ -44,9 +119,9 @@ function ManufacturedRawMaterialsContent() {
     
     // Listen for storage events to sync data changes from other pages
     const handleStorageChange = (e) => {
-      if (e.key === 'rawMaterials_updated') {
+      // Firestore real-time listeners handle data sync automatically
+      if (e.type === 'rawMaterialsUpdated') {
         loadRawMaterials();
-        localStorage.removeItem('rawMaterials_updated');
       }
     };
     
@@ -153,10 +228,11 @@ function ManufacturedRawMaterialsContent() {
   };
 
   const handleQuantityChange = (itemId, newQuantity) => {
-    const quantity = Math.max(1, parseInt(newQuantity) || 1);
+    // Allow any positive number for manual input, no restrictions
+    const quantity = Math.max(0, parseFloat(newQuantity) || 0);
     setModalItems(prev => prev.map(item => 
       item.id === itemId 
-        ? { ...item, quantity, totalPrice: item.unitPrice * quantity }
+        ? { ...item, quantity: Number(quantity.toFixed(1)), totalPrice: item.unitPrice * Number(quantity.toFixed(1)) }
         : item
     ));
   };
@@ -171,7 +247,7 @@ function ManufacturedRawMaterialsContent() {
       console.log('🛡️ SENIOR REACT: Using advanced duplicate prevention hook...');
       
       // Use Senior React Hook for comprehensive duplicate prevention
-      const duplicateCheckResult = preventDuplicates(modalItems, {
+      const duplicateCheckResult = await preventDuplicates(modalItems, {
         showError,
         errorTitle: 'بنود مكررة',
         stopOnDuplicates: true
@@ -191,44 +267,39 @@ function ManufacturedRawMaterialsContent() {
 
       console.log('No duplicates found, proceeding with item creation...');
       
-      // Create proper manufactured product items with ID-based relationships
+      // SENIOR REACT: Create tender items directly - proven method from ForeignProductTender fix
       const productItems = [];
       
       for (const item of uniqueModalItems) {
         try {
-          // Create product item using standard service methods (no need for special manufactured method)
-          let productItem;
-          try {
-            productItem = await TenderItemsService.createTenderItem({
-              materialInternalId: item.internalId,
-              materialType: 'rawMaterial',
-              quantity: item.quantity || 1,
-              tenderId: productId === 'new' ? 'new' : productId
-            });
-          } catch (createError) {
-            console.warn('⚠️ Full creation failed, using simple method:', createError.message);
-            // Fallback to simple creation with current item data
-            productItem = await TenderItemsService.createTenderItemSimple({
-              materialInternalId: item.internalId,
-              materialType: 'rawMaterial',
-              materialName: item.name,
-              materialCategory: item.category,
-              materialUnit: item.unit,
-              quantity: item.quantity || 1,
-              unitPrice: item.unitPrice || 0,
-              tenderId: productId === 'new' ? 'new' : productId,
-              supplierInfo: item.displaySupplier || ''
-            });
-          }
+          console.log('🔧 SENIOR REACT: Creating tender item directly for:', item.name);
           
-          productItems.push(productItem);
+          // Create tender item directly with all required fields - no complex service calls
+          const tenderItem = {
+            internalId: `ti_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            materialInternalId: item.internalId,
+            materialType: 'rawMaterial',
+            materialName: item.name,
+            materialCategory: item.category || '',
+            materialUnit: item.unit || 'قطعة',
+            quantity: item.quantity || 1,
+            unitPrice: item.unitPrice || 0,
+            totalPrice: (item.quantity || 1) * (item.unitPrice || 0),
+            supplierInfo: item.displaySupplier || '',
+            tenderId: productId === 'new' ? 'new' : productId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          };
           
-          console.log('Created manufactured product item with ID relationship:', {
-            productItemId: productItem.internalId,
-            linkedMaterialId: productItem.materialInternalId,
-            materialName: productItem.materialName,
-            currentPrice: productItem.unitPrice,
-            totalPrice: productItem.totalPrice
+          productItems.push(tenderItem);
+          
+          console.log('✅ SENIOR REACT: Created tender item directly:', {
+            id: tenderItem.internalId,
+            materialId: tenderItem.materialInternalId,
+            name: tenderItem.materialName,
+            quantity: tenderItem.quantity,
+            unitPrice: tenderItem.unitPrice,
+            totalPrice: tenderItem.totalPrice
           });
           
         } catch (itemError) {
@@ -238,33 +309,15 @@ function ManufacturedRawMaterialsContent() {
         }
       }
       
-      // Get existing items and merge with new items (duplicates already filtered out)
-      const existingItemsStorage = sessionStorage.getItem('pendingProductItems');
-      let allItems = [...productItems]; // Start with new items
+      // SENIOR REACT: Simple storage merge - same pattern as RawMaterialTender
+      const existingItemsStorage = await FirestorePendingDataService.getPendingProductItems() || [];
+      const allItems = [...existingItemsStorage, ...productItems];
       
-      if (existingItemsStorage) {
-        try {
-          const parsedExistingItems = JSON.parse(existingItemsStorage);
-          if (Array.isArray(parsedExistingItems)) {
-            // Refresh pricing for existing items before merging
-            const refreshedExistingItems = await TenderItemsService.refreshTenderItemsPricing(parsedExistingItems);
-            allItems = [...refreshedExistingItems, ...productItems];
-            
-            console.log('Merged items results:', {
-              existingItemsCount: refreshedExistingItems.length,
-              newItemsCount: productItems.length,
-              finalItemsCount: allItems.length
-            });
-          }
-        } catch (error) {
-          console.error('Error parsing existing items:', error);
-        }
-      }
-      
-      console.log('Storing ID-based manufactured product items:', {
-        totalItems: allItems.length,
-        newItems: productItems.length,
-        items: allItems.map(item => ({
+      console.log('📦 SENIOR REACT: Merging manufactured product items:', {
+        existingCount: existingItemsStorage.length,
+        newCount: productItems.length,
+        totalCount: allItems.length,
+        items: productItems.map(item => ({
           id: item.internalId,
           materialId: item.materialInternalId,
           name: item.materialName,
@@ -273,20 +326,35 @@ function ManufacturedRawMaterialsContent() {
         }))
       });
       
-      sessionStorage.setItem('pendingProductItems', JSON.stringify(allItems));
+      // Use setPendingProductItems with merged items - same pattern as tender
+      await FirestorePendingDataService.setPendingProductItems(allItems);
+
+      // SENIOR REACT: Dispatch custom event to notify Manufacturing Products page
+      console.log('🚀 SENIOR REACT: Dispatching product items added event');
+      window.dispatchEvent(new CustomEvent('productItemsAdded', {
+        detail: {
+          source: 'ManufacturedRawMaterials',
+          itemsCount: productItems.length,
+          items: productItems.map(item => ({
+            id: item.internalId,
+            name: item.materialName,
+            type: item.materialType
+          }))
+        }
+      }));
 
       // Log activity
       try {
         const currentUser = getCurrentUser();
         if (currentUser && currentUser.name) {
-          logActivity('task', `${currentUser.name} أضاف مواد خام للمنتج المصنع`, `تم إضافة ${productItems.length} مادة خام بنظام الهوية الفريدة`);
+          logActivity('task', `${currentUser.name} أضاف مواد خام للمنتج المصنع`, `تم إضافة ${productItems.length} مادة خام`);
         }
       } catch (logError) {
         console.error('Failed to log activity:', logError);
       }
       
       // Show success message
-      showSuccess(`تم إضافة ${productItems.length} مادة خام للمنتج المصنع مع ربط الأسعار الديناميكي`, 'تمت الإضافة');
+      showSuccess(`تم إضافة ${productItems.length} مادة خام للمنتج المصنع بنجاح`, 'تمت الإضافة');
       
       // Close modal and navigate back to ManufacturedProducts
       setShowQuantityModal(false);
@@ -347,7 +415,7 @@ function ManufacturedRawMaterialsContent() {
   return (
     <>
       <div className={`page-wrapper ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
-        <Header onToggle={handleToggle} />
+          <Header onToggle={handleToggle} />
         
         <div className="main-container" style={{
           paddingRight: sidebarCollapsed ? '72px' : '250px',
@@ -648,8 +716,8 @@ function ManufacturedRawMaterialsContent() {
                               <button 
                                 type="button" 
                                 className="btn btn-outline-secondary btn-sm"
-                                onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
-                                disabled={item.quantity <= 1}
+                                onClick={() => handleQuantityChange(item.id, Math.max(0, Number((item.quantity - 0.1).toFixed(1))))}
+                                disabled={item.quantity <= 0}
                                 style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                               >
                                 <i className="bi bi-dash"></i>
@@ -659,13 +727,19 @@ function ManufacturedRawMaterialsContent() {
                                 className="form-control text-center mx-2"
                                 style={{ width: '80px', height: '32px', borderRadius: '6px' }}
                                 value={item.quantity}
-                                min="1"
+                                min="0"
+                                step="any"
                                 onChange={(e) => handleQuantityChange(item.id, e.target.value)}
+                                onBlur={(e) => {
+                                  // Format to 1 decimal place when user finishes editing
+                                  const formattedValue = Number(e.target.value || 0).toFixed(1);
+                                  handleQuantityChange(item.id, formattedValue);
+                                }}
                               />
                               <button 
                                 type="button" 
                                 className="btn btn-outline-secondary btn-sm"
-                                onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                                onClick={() => handleQuantityChange(item.id, Number((item.quantity + 0.1).toFixed(1)))}
                                 style={{ width: '32px', height: '32px', borderRadius: '6px' }}
                               >
                                 <i className="bi bi-plus"></i>
@@ -682,7 +756,7 @@ function ManufacturedRawMaterialsContent() {
                               {Math.round(item.totalPrice)} ريال
                             </div>
                             <small className="text-success">
-                              ({item.quantity} × {Math.round(item.unitPrice)})
+                              ({item.quantity.toFixed(1)} × {Math.round(item.unitPrice)})
                             </small>
                           </td>
                         </tr>
@@ -700,7 +774,7 @@ function ManufacturedRawMaterialsContent() {
                       {getTotalModalPrice()} ريال
                     </span>
                     <span className="badge bg-info ms-2">
-                      {modalItems.reduce((total, item) => total + item.quantity, 0)} قطعة
+                      {modalItems.reduce((total, item) => total + item.quantity, 0).toFixed(1)} قطعة
                     </span>
                   </div>
                   <div className="d-flex gap-2">

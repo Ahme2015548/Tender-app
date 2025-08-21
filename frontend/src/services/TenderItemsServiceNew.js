@@ -22,8 +22,9 @@ const TENDER_ITEMS_COLLECTION = 'tenderItems';
 
 // Helper function to trigger data sync across pages
 const triggerDataSync = () => {
-  localStorage.setItem('tenderItems_updated', Date.now().toString());
-  window.dispatchEvent(new CustomEvent('tenderItemsUpdated'));
+  window.dispatchEvent(new CustomEvent('tenderItemsUpdated', {
+    detail: { timestamp: Date.now() }
+  }));
 };
 
 export class TenderItemsServiceNew {
@@ -298,19 +299,29 @@ export class TenderItemsServiceNew {
   }
 
   // Refresh prices for all items in a tender
-  static async refreshTenderItemsPricing(tenderId) {
+  static async refreshTenderItemsPricing(tenderIdOrItems) {
     try {
-      console.log('🔄 Refreshing prices for tender:', tenderId);
+      console.log('🔄 Refreshing prices for tender:', tenderIdOrItems);
       
-      const items = await this.getTenderItems(tenderId);
+      // Handle both tender ID (string) and array of items
+      let items;
+      if (Array.isArray(tenderIdOrItems)) {
+        console.log('📦 Input is array of items, using directly');
+        items = tenderIdOrItems;
+      } else {
+        console.log('🔍 Input is tender ID, fetching items from database');
+        items = await this.getTenderItems(tenderIdOrItems);
+      }
       
-      if (items.length === 0) {
+      if (!items || items.length === 0) {
+        console.log('📭 No items to refresh pricing for');
         return [];
       }
       
       const updatedItems = [];
       const batch = writeBatch(db);
       let batchUpdates = 0;
+      const isItemsArray = Array.isArray(tenderIdOrItems);
       
       for (const item of items) {
         try {
@@ -331,10 +342,13 @@ export class TenderItemsServiceNew {
           
           if (materialDetails) {
             const newUnitPrice = parseFloat(materialDetails.price) || 0;
-            const newTotalPrice = item.quantity * newUnitPrice;
+            const newTotalPrice = (item.quantity || 1) * newUnitPrice;
             
-            // Update if price changed
-            if (newUnitPrice !== item.unitPrice) {
+            // Only update database if we're working with database items (not pending items)
+            const shouldUpdateDb = !isItemsArray && item.id && (newUnitPrice !== item.unitPrice);
+            
+            if (shouldUpdateDb) {
+              console.log('🔄 Updating database item price:', item.materialName);
               const itemRef = doc(db, TENDER_ITEMS_COLLECTION, item.id);
               batch.update(itemRef, {
                 unitPrice: newUnitPrice,
@@ -346,19 +360,16 @@ export class TenderItemsServiceNew {
                 updatedAt: serverTimestamp()
               });
               batchUpdates++;
-              
-              updatedItems.push({
-                ...item,
-                unitPrice: newUnitPrice,
-                totalPrice: newTotalPrice,
-                supplierInfo: {
-                  name: materialDetails.supplier || '',
-                  id: materialDetails.supplierId || ''
-                }
-              });
-            } else {
-              updatedItems.push(item);
             }
+            
+            // Always create updated item object (for both db and pending items)
+            updatedItems.push({
+              ...item,
+              unitPrice: newUnitPrice,
+              totalPrice: newTotalPrice,
+              supplierInfo: materialDetails.supplier || item.supplierInfo || '',
+              materialUnit: materialDetails.unit || item.materialUnit || 'قطعة'
+            });
           } else {
             console.warn('⚠️ Material not found for item:', item.materialInternalId);
             updatedItems.push(item);

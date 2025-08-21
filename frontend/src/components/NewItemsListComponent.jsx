@@ -4,6 +4,7 @@ import { useActivity } from './ActivityManager';
 import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import ModernSpinner from './ModernSpinner';
+import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 
 const NewItemsListComponent = ({ refreshTrigger }) => {
   const [items, setItems] = useState([]);
@@ -147,8 +148,8 @@ const NewItemsListComponent = ({ refreshTrigger }) => {
       addedAt: new Date().toISOString()
     }));
     
-    // Store selected items in sessionStorage as backup
-    sessionStorage.setItem('pendingTenderItems', JSON.stringify(tenderItems));
+    // Store selected items in Firestore as backup
+    await FirestorePendingDataService.setPendingTenderItems(tenderItems);
     
     // Navigate back to tender with selected items
     const backPath = tenderData?.id ? `/tenders/edit/${tenderData.id}` : '/tenders/add';
