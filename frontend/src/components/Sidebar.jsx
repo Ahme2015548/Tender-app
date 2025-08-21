@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { getImage } from '../utils/ImageManager';
 import './Sidebar.scss';
 
 export default function Sidebar({ isCollapsed }) {
   const location = useLocation();
   const [activeItem, setActiveItem] = useState('dashboard');
+  const [isTenderItemsOpen, setIsTenderItemsOpen] = useState(false);
+  const [isTenderItemsDetailsOpen, setIsTenderItemsDetailsOpen] = useState(false);
+  const [isSuppliersOpen, setIsSuppliersOpen] = useState(false);
+  const [isHROpen, setIsHROpen] = useState(false);
 
   // Update active item based on current route
   useEffect(() => {
@@ -20,9 +25,6 @@ export default function Sidebar({ isCollapsed }) {
       setIsTenderItemsDetailsOpen(true); // Auto-expand the treeview
     } else if (path === '/foreign-products') {
       setActiveItem('imported-product');
-      setIsTenderItemsDetailsOpen(true); // Auto-expand the treeview
-    } else if (path === '/manufactured-products' || path.startsWith('/manufactured-products/')) {
-      setActiveItem('manufactured-product');
       setIsTenderItemsDetailsOpen(true); // Auto-expand the treeview
     } else if (path === '/suppliers/local') {
       setActiveItem('local-suppliers');
@@ -60,10 +62,6 @@ export default function Sidebar({ isCollapsed }) {
       setIsTenderItemsDetailsOpen(false);
     }
   }, [location.pathname]);
-  const [isTenderItemsOpen, setIsTenderItemsOpen] = useState(false);
-  const [isTenderItemsDetailsOpen, setIsTenderItemsDetailsOpen] = useState(false);
-  const [isSuppliersOpen, setIsSuppliersOpen] = useState(false);
-  const [isHROpen, setIsHROpen] = useState(false);
   
   // Default menu items order
   const defaultMenuItems = [
@@ -104,23 +102,14 @@ export default function Sidebar({ isCollapsed }) {
       const saved = localStorage.getItem(key);
       if (saved) {
         const parsed = JSON.parse(saved);
-        // Validate that saved data has the same structure and components
+        // Validate that saved data has the same structure
         if (Array.isArray(parsed) && parsed.length === defaultItems.length) {
-          // Check if all default components exist in saved data
-          const defaultComponents = defaultItems.map(item => item.component);
-          const savedComponents = parsed.map(item => item.component);
-          const hasAllComponents = defaultComponents.every(comp => savedComponents.includes(comp));
-          
-          if (hasAllComponents) {
-            return parsed;
-          }
+          return parsed;
         }
       }
     } catch (error) {
       console.error('Error loading saved order:', error);
     }
-    // If validation fails or no saved data, clear localStorage and return defaults
-    localStorage.removeItem(key);
     return defaultItems;
   };
 
@@ -141,7 +130,7 @@ export default function Sidebar({ isCollapsed }) {
     loadSavedOrder('sidebar-supplier-sub-items', defaultSupplierSubItems)
   );
 
-  const [hrSubItems, setHrSubItems] = useState(() => 
+  const [hrSubItems, setHRSubItems] = useState(() => 
     loadSavedOrder('sidebar-hr-sub-items', defaultHRSubItems)
   );
 
@@ -172,7 +161,7 @@ export default function Sidebar({ isCollapsed }) {
     setTenderSubItems(defaultTenderSubItems);
     setTenderDetailSubItems(defaultTenderDetailSubItems);
     setSupplierSubItems(defaultSupplierSubItems);
-    setHrSubItems(defaultHRSubItems);
+    setHRSubItems(defaultHRSubItems);
     localStorage.removeItem('sidebar-menu-items');
     localStorage.removeItem('sidebar-tender-sub-items');
     localStorage.removeItem('sidebar-tender-detail-sub-items');
@@ -267,7 +256,7 @@ export default function Sidebar({ isCollapsed }) {
       newSubItems.splice(draggedIndex, 1);
       newSubItems.splice(targetIndex, 0, draggedItem);
       
-      setHrSubItems(newSubItems);
+      setHRSubItems(newSubItems);
     }
 
     setDraggedItem(null);
@@ -730,7 +719,7 @@ export default function Sidebar({ isCollapsed }) {
       'raw-materials': { to: '/raw-materials', icon: 'bi-gear', text: 'مواد خام' },
       'local-product': { to: '/local-products', icon: 'bi-house', text: 'منتج محلي' },
       'imported-product': { to: '/foreign-products', icon: 'bi-globe', text: 'منتج مستورد' },
-      'manufactured-product': { to: '/manufactured-products', icon: 'bi-boxes', text: 'منتجات المصنع' }
+      'manufactured-product': { icon: 'bi-tools', text: 'منتج مصنع' }
     };
 
     const config = subItemConfig[subItem.id];
@@ -751,8 +740,8 @@ export default function Sidebar({ isCollapsed }) {
       handleDrop(e, subItem, 'tender-detail-sub');
     };
 
-    // raw-materials, local-product, imported-product, and manufactured-product have links, others are just clickable elements
-    const hasLink = subItem.id === 'raw-materials' || subItem.id === 'local-product' || subItem.id === 'imported-product' || subItem.id === 'manufactured-product';
+    // raw-materials, local-product, and imported-product have links, others are just clickable elements
+    const hasLink = subItem.id === 'raw-materials' || subItem.id === 'local-product' || subItem.id === 'imported-product';
 
     return (
       <li 
@@ -949,197 +938,6 @@ export default function Sidebar({ isCollapsed }) {
       </li>
     );
   };
-
-  const renderHRSubItem = (subItem) => {
-    const subItemConfig = {
-      'employees': { to: '/employees', icon: 'bi-person-badge-fill', text: 'الموظفون' }
-    };
-
-    const config = subItemConfig[subItem.id];
-    if (!config) return null;
-
-    const handleSubItemDragStart = (e) => {
-      e.stopPropagation();
-      handleDragStart(e, subItem, 'hr-sub');
-    };
-
-    const handleSubItemDragOver = (e) => {
-      e.stopPropagation();
-      handleDragOver(e);
-    };
-
-    const handleSubItemDrop = (e) => {
-      e.stopPropagation();
-      handleDrop(e, subItem, 'hr-sub');
-    };
-
-    return (
-      <li 
-        key={subItem.id}
-        className={activeItem === subItem.id ? 'active' : ''}
-        style={{
-          opacity: draggedItem && draggedItem.id === subItem.id ? 0.5 : 1,
-          transition: 'opacity 0.2s ease'
-        }}
-        draggable={isSortEnabled}
-        onDragStart={isSortEnabled ? handleSubItemDragStart : undefined}
-        onDragOver={isSortEnabled ? handleSubItemDragOver : undefined}
-        onDrop={isSortEnabled ? handleSubItemDrop : undefined}
-        onDragEnd={isSortEnabled ? handleDragEnd : undefined}
-      >
-        <Link 
-          to={config.to}
-          onClick={(e) => {
-            // Prevent navigation if dragging started from grip
-            if (e.target.closest('.drag-handle')) {
-              e.preventDefault();
-              return;
-            }
-            setActiveItem(subItem.id);
-          }} 
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            padding: '7px 35px 7px 15px',
-            textDecoration: 'none',
-            marginRight: '0px'
-          }}
-        >
-          {isSortEnabled && (
-            <i 
-              className="bi bi-grip-vertical drag-handle" 
-              style={{
-                fontSize: '0.8rem',
-                color: '#aaa',
-                marginLeft: '5px',
-                cursor: 'grab'
-              }}
-              onMouseDown={(e) => e.stopPropagation()}
-            />
-          )}
-          <i className={config.icon} style={{
-            fontSize: '1.1rem',
-            flexShrink: 0,
-            background: '#f5f6fa',
-            width: '36px',
-            height: '36px',
-            marginLeft: '15px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: '4px'
-          }} />
-          <span className="menu-text" style={{ whiteSpace: 'nowrap' }}>{config.text}</span>
-        </Link>
-      </li>
-    );
-  };
-
-  const renderHRTreeview = (item) => (
-    <li 
-      key={item.id}
-      className={`treeview ${isHROpen ? 'open' : ''}`} 
-      style={isCollapsed ? {
-        display: 'flex !important',
-        justifyContent: 'center !important',
-        alignItems: 'center !important',
-        width: '72px !important',
-        margin: '0 !important',
-        padding: '0 !important'
-      } : {
-        opacity: draggedItem && draggedItem.id === item.id ? 0.5 : 1,
-        transition: 'opacity 0.2s ease'
-      }} 
-      data-collapsed={isCollapsed}
-      draggable={!isCollapsed && isSortEnabled}
-      onDragStart={isSortEnabled ? (e) => handleDragStart(e, item, 'main') : undefined}
-      onDragOver={isSortEnabled ? handleDragOver : undefined}
-      onDrop={isSortEnabled ? (e) => handleDrop(e, item, 'main') : undefined}
-      onDragEnd={isSortEnabled ? handleDragEnd : undefined}
-    >
-      <a 
-        href="#!" 
-        onClick={(e) => {
-          // Prevent toggle if dragging started from grip
-          if (e.target.closest('.drag-handle')) {
-            e.preventDefault();
-            return;
-          }
-          setIsHROpen(!isHROpen);
-        }}
-        style={isCollapsed ? {
-          display: 'flex !important',
-          alignItems: 'center !important',
-          justifyContent: 'center !important',
-          padding: '10px 0 !important',
-          textDecoration: 'none !important',
-          color: '#4d4d4d !important',
-          width: '72px !important',
-          margin: '0 auto !important',
-          position: 'relative !important',
-          left: '0 !important',
-          right: '0 !important'
-        } : {
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'flex-start',
-          padding: '7px 12px 7px 15px',
-          textDecoration: 'none',
-          color: '#4d4d4d',
-          width: '100%'
-        }}
-      >
-        {!isCollapsed && isSortEnabled && (
-          <i className="bi bi-grip-vertical drag-handle" style={{
-            fontSize: '0.9rem',
-            color: '#888',
-            marginLeft: '8px',
-            cursor: 'grab'
-          }} />
-        )}
-        <i className="bi bi-briefcase-fill" style={isCollapsed ? {
-          fontSize: '1.1rem !important',
-          display: 'flex !important',
-          alignItems: 'center !important',
-          justifyContent: 'center !important',
-          visibility: 'visible !important',
-          opacity: '1 !important',
-          width: '36px !important',
-          height: '36px !important',
-          borderRadius: '4px !important',
-          background: 'transparent !important',
-          color: 'inherit !important',
-          position: 'absolute !important',
-          left: '18px !important',
-          top: '50% !important',
-          transform: 'translateY(-50%) !important',
-          margin: '0 !important',
-          padding: '0 !important'
-        } : {
-          fontSize: '1.1rem',
-          flexShrink: 0,
-          background: '#f5f6fa',
-          width: '36px',
-          height: '36px',
-          marginRight: '15px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRadius: '4px'
-        }} />
-        {!isCollapsed && (
-          <span className="menu-text" style={{ whiteSpace: 'nowrap' }}>
-            الموارد البشرية
-          </span>
-        )}
-      </a>
-      {isHROpen && !isCollapsed && (
-        <ul className="treeview-menu">
-          {hrSubItems.map(subItem => renderHRSubItem(subItem))}
-        </ul>
-      )}
-    </li>
-  );
 
   const renderSuppliersTreeview = (item) => (
     <li 
@@ -1444,6 +1242,197 @@ export default function Sidebar({ isCollapsed }) {
   );
 
 
+  const renderHRSubItem = (subItem) => {
+    const subItemConfig = {
+      'employees': { to: '/employees', icon: 'bi-person-badge-fill', text: 'الموظفين' }
+    };
+
+    const config = subItemConfig[subItem.id];
+    if (!config) return null;
+
+    const handleSubItemDragStart = (e) => {
+      e.stopPropagation();
+      handleDragStart(e, subItem, 'hr-sub');
+    };
+
+    const handleSubItemDragOver = (e) => {
+      e.stopPropagation();
+      handleDragOver(e);
+    };
+
+    const handleSubItemDrop = (e) => {
+      e.stopPropagation();
+      handleDrop(e, subItem, 'hr-sub');
+    };
+
+    return (
+      <li 
+        key={subItem.id}
+        className={activeItem === subItem.id ? 'active' : ''}
+        style={{
+          opacity: draggedItem && draggedItem.id === subItem.id ? 0.5 : 1,
+          transition: 'opacity 0.2s ease'
+        }}
+        draggable={isSortEnabled}
+        onDragStart={isSortEnabled ? handleSubItemDragStart : undefined}
+        onDragOver={isSortEnabled ? handleSubItemDragOver : undefined}
+        onDrop={isSortEnabled ? handleSubItemDrop : undefined}
+        onDragEnd={isSortEnabled ? handleDragEnd : undefined}
+      >
+        <Link 
+          to={config.to}
+          onClick={(e) => {
+            // Prevent navigation if dragging started from grip
+            if (e.target.closest('.drag-handle')) {
+              e.preventDefault();
+              return;
+            }
+            setActiveItem(subItem.id);
+          }} 
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            padding: '7px 35px 7px 15px',
+            textDecoration: 'none',
+            marginRight: '0px'
+          }}
+        >
+          {isSortEnabled && (
+            <i 
+              className="bi bi-grip-vertical drag-handle" 
+              style={{
+                fontSize: '0.8rem',
+                color: '#aaa',
+                marginLeft: '5px',
+                cursor: 'grab'
+              }}
+              onMouseDown={(e) => e.stopPropagation()}
+            />
+          )}
+          <i className={config.icon} style={{
+            fontSize: '1.1rem',
+            flexShrink: 0,
+            background: '#f5f6fa',
+            width: '36px',
+            height: '36px',
+            marginLeft: '15px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: '4px'
+          }} />
+          <span className="menu-text" style={{ whiteSpace: 'nowrap' }}>{config.text}</span>
+        </Link>
+      </li>
+    );
+  };
+
+  const renderHRTreeview = (item) => (
+    <li 
+      key={item.id}
+      className={`treeview ${isHROpen ? 'open' : ''}`} 
+      style={isCollapsed ? {
+        display: 'flex !important',
+        justifyContent: 'center !important',
+        alignItems: 'center !important',
+        width: '72px !important',
+        margin: '0 !important',
+        padding: '0 !important'
+      } : {
+        opacity: draggedItem && draggedItem.id === item.id ? 0.5 : 1,
+        transition: 'opacity 0.2s ease'
+      }} 
+      data-collapsed={isCollapsed}
+      draggable={!isCollapsed && isSortEnabled}
+      onDragStart={isSortEnabled ? (e) => handleDragStart(e, item, 'main') : undefined}
+      onDragOver={isSortEnabled ? handleDragOver : undefined}
+      onDrop={isSortEnabled ? (e) => handleDrop(e, item, 'main') : undefined}
+      onDragEnd={isSortEnabled ? handleDragEnd : undefined}
+    >
+      <a 
+        href="#!" 
+        onClick={(e) => {
+          // Prevent toggle if dragging started from grip
+          if (e.target.closest('.drag-handle')) {
+            e.preventDefault();
+            return;
+          }
+          setIsHROpen(!isHROpen);
+        }}
+        style={isCollapsed ? {
+          display: 'flex !important',
+          alignItems: 'center !important',
+          justifyContent: 'center !important',
+          padding: '10px 0 !important',
+          textDecoration: 'none !important',
+          color: '#4d4d4d !important',
+          width: '72px !important',
+          margin: '0 auto !important',
+          position: 'relative !important',
+          left: '0 !important',
+          right: '0 !important'
+        } : {
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-start',
+          padding: '7px 12px 7px 15px',
+          textDecoration: 'none',
+          color: '#4d4d4d',
+          width: '100%'
+        }}
+      >
+        {!isCollapsed && isSortEnabled && (
+          <i className="bi bi-grip-vertical drag-handle" style={{
+            fontSize: '0.9rem',
+            color: '#888',
+            marginLeft: '8px',
+            cursor: 'grab'
+          }} />
+        )}
+        <i className="bi bi-person-workspace" style={isCollapsed ? {
+          fontSize: '1.1rem !important',
+          display: 'flex !important',
+          alignItems: 'center !important',
+          justifyContent: 'center !important',
+          visibility: 'visible !important',
+          opacity: '1 !important',
+          width: '36px !important',
+          height: '36px !important',
+          borderRadius: '4px !important',
+          background: 'transparent !important',
+          color: 'inherit !important',
+          position: 'absolute !important',
+          left: '18px !important',
+          top: '50% !important',
+          transform: 'translateY(-50%) !important',
+          margin: '0 !important',
+          padding: '0 !important'
+        } : {
+          fontSize: '1.1rem',
+          flexShrink: 0,
+          background: '#f5f6fa',
+          width: '36px',
+          height: '36px',
+          marginRight: '15px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderRadius: '4px'
+        }} />
+        {!isCollapsed && (
+          <span className="menu-text" style={{ whiteSpace: 'nowrap' }}>
+            الموارد البشرية
+          </span>
+        )}
+      </a>
+      {isHROpen && !isCollapsed && (
+        <ul className="treeview-menu">
+          {hrSubItems.map(subItem => renderHRSubItem(subItem))}
+        </ul>
+      )}
+    </li>
+  );
+
   const renderMenuItem = (item) => {
     switch (item.component) {
       case 'dashboard':
@@ -1476,7 +1465,7 @@ export default function Sidebar({ isCollapsed }) {
       }}>
         {isCollapsed ? (
           <img 
-            src="/assets/images/logo.svg" 
+            src={getImage('logo.svg')} 
             alt="Modern Bin" 
             style={{
               width: '40px',
