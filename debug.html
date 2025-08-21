@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug - Tender App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8f9fa;
+            direction: rtl;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+            background: #e7f3ff;
+        }
+        .error {
+            border-left-color: #dc3545;
+            background: #ffe7e7;
+            color: #721c24;
+        }
+        .success {
+            border-left-color: #28a745;
+            background: #d4edda;
+            color: #155724;
+        }
+        .code {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 style="color: #007bff; text-align: center;">🔧 تشخيص التطبيق</h1>
+        <p style="text-align: center; color: #666;">أداة تشخيص مشاكل التطبيق</p>
+        
+        <div id="tests"></div>
+        
+        <div class="status">
+            <strong>المعلومات الأساسية:</strong><br>
+            - المتصفح: <span id="browser"></span><br>
+            - JavaScript مفعل: ✅<br>
+            - HTML يعمل بشكل طبيعي: ✅
+        </div>
+        
+        <button onclick="runTests()">🔍 تشغيل الاختبارات</button>
+        <button onclick="testVite()">⚡ اختبار Vite</button>
+        <button onclick="testReact()">⚛️ اختبار React</button>
+        <button onclick="clearTests()">🧹 مسح النتائج</button>
+        
+        <div id="console-output" class="code" style="max-height: 300px; overflow-y: auto;"></div>
+    </div>
+
+    <script>
+        // Capture console output
+        const originalConsoleLog = console.log;
+        const originalConsoleError = console.error;
+        const originalConsoleWarn = console.warn;
+        
+        let consoleOutput = [];
+        
+        function addToConsole(type, message) {
+            const timestamp = new Date().toLocaleTimeString();
+            consoleOutput.push(`[${timestamp}] [${type.toUpperCase()}] ${message}`);
+            updateConsoleDisplay();
+        }
+        
+        console.log = function(...args) {
+            originalConsoleLog.apply(console, args);
+            addToConsole('log', args.join(' '));
+        };
+        
+        console.error = function(...args) {
+            originalConsoleError.apply(console, args);
+            addToConsole('error', args.join(' '));
+        };
+        
+        console.warn = function(...args) {
+            originalConsoleWarn.apply(console, args);
+            addToConsole('warn', args.join(' '));
+        };
+        
+        function updateConsoleDisplay() {
+            const element = document.getElementById('console-output');
+            element.textContent = consoleOutput.slice(-20).join('\n');
+            element.scrollTop = element.scrollHeight;
+        }
+        
+        function addTest(title, status, details = '') {
+            const testsDiv = document.getElementById('tests');
+            const testDiv = document.createElement('div');
+            testDiv.className = `status ${status}`;
+            testDiv.innerHTML = `<strong>${title}:</strong> ${details}`;
+            testsDiv.appendChild(testDiv);
+        }
+        
+        function clearTests() {
+            document.getElementById('tests').innerHTML = '';
+            consoleOutput = [];
+            updateConsoleDisplay();
+        }
+        
+        // Basic browser info
+        document.getElementById('browser').textContent = navigator.userAgent.split(' ').slice(-2).join(' ');
+        
+        function runTests() {
+            clearTests();
+            console.log('🚀 بدء اختبارات التشخيص...');
+            
+            // Test 1: Basic JavaScript
+            try {
+                const testObj = { test: 'value' };
+                addTest('JavaScript الأساسي', 'success', '✅ يعمل بشكل طبيعي');
+            } catch (error) {
+                addTest('JavaScript الأساسي', 'error', `❌ ${error.message}`);
+            }
+            
+            // Test 2: ES6 Features
+            try {
+                const arrow = () => 'test';
+                const [a, b] = [1, 2];
+                const { test } = { test: 'value' };
+                addTest('ES6 Features', 'success', '✅ Arrow functions, destructuring تعمل');
+            } catch (error) {
+                addTest('ES6 Features', 'error', `❌ ${error.message}`);
+            }
+            
+            // Test 3: Fetch API
+            try {
+                if (typeof fetch !== 'undefined') {
+                    addTest('Fetch API', 'success', '✅ متوفرة');
+                } else {
+                    addTest('Fetch API', 'error', '❌ غير متوفرة');
+                }
+            } catch (error) {
+                addTest('Fetch API', 'error', `❌ ${error.message}`);
+            }
+            
+            // Test 4: Local Storage
+            try {
+                localStorage.setItem('test', 'value');
+                localStorage.removeItem('test');
+                addTest('Local Storage', 'success', '✅ يعمل بشكل طبيعي');
+            } catch (error) {
+                addTest('Local Storage', 'error', `❌ ${error.message}`);
+            }
+            
+            console.log('✅ اكتملت اختبارات التشخيص الأساسية');
+        }
+        
+        function testVite() {
+            console.log('⚡ اختبار Vite...');
+            
+            // Test if we can access Vite's import.meta
+            try {
+                if (typeof import !== 'undefined') {
+                    addTest('Import Statement', 'success', '✅ مدعوم');
+                } else {
+                    addTest('Import Statement', 'error', '❌ غير مدعوم');
+                }
+            } catch (error) {
+                addTest('Import Statement', 'error', `❌ ${error.message}`);
+            }
+            
+            // Test module loading
+            try {
+                // Try to dynamically import something
+                import('./debug-test-module.js')
+                    .then(() => {
+                        addTest('Dynamic Import', 'success', '✅ يعمل');
+                    })
+                    .catch((error) => {
+                        addTest('Dynamic Import', 'error', `❌ ${error.message}`);
+                    });
+            } catch (error) {
+                addTest('Dynamic Import', 'error', `❌ ${error.message}`);
+            }
+        }
+        
+        function testReact() {
+            console.log('⚛️ اختبار React...');
+            
+            // Try to load React
+            try {
+                const script = document.createElement('script');
+                script.src = 'https://unpkg.com/react@18/umd/react.development.js';
+                script.onload = function() {
+                    if (typeof React !== 'undefined') {
+                        addTest('React CDN', 'success', '✅ تم تحميل React من CDN');
+                    } else {
+                        addTest('React CDN', 'error', '❌ فشل في تحميل React');
+                    }
+                };
+                script.onerror = function() {
+                    addTest('React CDN', 'error', '❌ خطأ في تحميل React من CDN');
+                };
+                document.head.appendChild(script);
+            } catch (error) {
+                addTest('React CDN', 'error', `❌ ${error.message}`);
+            }
+        }
+        
+        // Auto-run basic tests on page load
+        setTimeout(runTests, 500);
+        
+        console.log('✅ تم تحميل صفحة التشخيص بنجاح');
+    </script>
+</body>
+</html>

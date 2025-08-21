@@ -1,0 +1,47 @@
+/* Sidebar active item background */
+.sidebar-menu li.active,
+.sidebar-menu li.active > a {
+  background-color: #007bff !important;
+  color: #fff !important;
+}
+
+/* Keep icon color blue */
+.sidebar-menu li.active i {
+  color: #007bff !important;
+}
+
+/* Text color in active menu */
+.sidebar-menu li.active .menu-text {
+  color: #fff !important;
+}
+
+/* Submenu visibility */
+.treeview.open .treeview-menu {
+  display: block;
+}
+
+/* SUBMENU ACTIVE STYLING - Blue background only on selected item */
+.sidebar-menu .treeview-menu li.active,
+.sidebar-menu .treeview-menu li.active > a {
+  background-color: #007bff !important;
+  color: #fff !important;
+  position: relative !important;
+}
+
+/* MENU ARROW - Only display on selected/clicked submenu item */
+.sidebar-menu .treeview-menu li.active {
+  background-image: url(/Tender-app/images/menu-arrow.svg) !important;
+  background-repeat: no-repeat !important;
+  background-position: right 0 top 10px !important;
+  background-size: 14px 32px !important;
+}
+
+/* Keep submenu icon color blue */
+.sidebar-menu .treeview-menu li.active i {
+  color: #007bff !important;
+}
+
+/* Submenu active text color */
+.sidebar-menu .treeview-menu li.active .menu-text {
+  color: #fff !important;
+}
