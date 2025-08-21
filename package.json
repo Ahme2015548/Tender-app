@@ -6,12 +6,15 @@
     "dev": "node ./node_modules/vite/bin/vite.js",
     "build": "node build.cjs",
     "build:vite": "node ./node_modules/vite/bin/vite.js build",
+    "preview": "node ./node_modules/vite/bin/vite.js preview",
+    "clean": "rimraf dist",
     "lint": "eslint .",
-    "preview": "node ./node_modules/vite/bin/vite.js preview"
+    "prebuild": "node -e \"try{console.log('node',process.version);require('fs').readdirSync('node_modules/vite/dist/node/chunks').slice(0,5).forEach(f=>console.log('vite chunk:',f))}catch(e){console.error('vite chunks missing',e?.message)}\""
   },
   "engines": {
-    "node": ">=18 <23"
+    "node": "20.19.x"
   },
+  "packageManager": "npm@10.8.1",
   "type": "module",
   "dependencies": {
     "bootstrap": "^5.3.7",
@@ -27,12 +30,12 @@
     "@eslint/js": "^9.30.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "@vitejs/plugin-react": "^4.6.0",
+    "@vitejs/plugin-react": "4.3.1",
     "eslint": "^9.30.1",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.3.0",
-    "rimraf": "^6.0.1",
-    "vite": "^7.0.4"
+    "rimraf": "5.0.7",
+    "vite": "5.4.10"
   }
 }

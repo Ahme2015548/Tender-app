@@ -1,4 +1,3 @@
-// build.cjs
 (async () => {
   console.log("Running Vite build via programmatic API...");
   try {
@@ -11,10 +10,8 @@
     try {
       const { spawn } = await import('node:child_process');
       await new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'build'], {
-          stdio: 'inherit',
-        });
-        child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`vite exited ${code}`)));
+        const child = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'build'], { stdio: 'inherit' });
+        child.on('close', code => code === 0 ? resolve() : reject(new Error(`vite exited ${code}`)));
       });
       console.log("Fallback build completed.");
       process.exit(0);
