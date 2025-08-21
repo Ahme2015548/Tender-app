@@ -3,11 +3,14 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "dev": "vite",
+    "dev": "node ./node_modules/vite/bin/vite.js",
     "build": "node build.cjs",
-    "build:vite": "vite build",
+    "build:vite": "node ./node_modules/vite/bin/vite.js build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "node ./node_modules/vite/bin/vite.js preview"
+  },
+  "engines": {
+    "node": ">=18 <23"
   },
   "type": "module",
   "dependencies": {
