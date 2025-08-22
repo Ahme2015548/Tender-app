@@ -20,11 +20,10 @@
       console.log("🔧 Building with Webpack + Babel (bypassing Vite completely)...");
       
       // Install webpack and babel for alternative build
-      execSync('npm install --no-save webpack webpack-cli babel-loader @babel/core @babel/preset-react @babel/preset-env css-loader style-loader sass-loader html-webpack-plugin copy-webpack-plugin', { stdio: 'inherit', timeout: 120000 });
+      execSync('npm install --no-save webpack webpack-cli babel-loader @babel/core @babel/preset-react @babel/preset-env css-loader style-loader sass-loader sass html-webpack-plugin copy-webpack-plugin', { stdio: 'inherit', timeout: 120000 });
       
       // Create webpack config for emergency build
-      const webpackConfig = `
-const path = require('path');
+      const webpackConfig = `const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
 

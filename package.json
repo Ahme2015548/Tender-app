@@ -1,7 +1,7 @@
 {
   "name": "tender-app",
   "private": true,
-  "version": "1.0.6",
+  "version": "1.0.7",
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js",
     "build": "node build.cjs",
