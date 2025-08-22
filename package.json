@@ -1,15 +1,14 @@
 {
   "name": "tender-app",
   "private": true,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "scripts": {
     "dev": "node ./node_modules/vite/bin/vite.js",
     "build": "node build.cjs",
     "build:vite": "node ./node_modules/vite/bin/vite.js build",
     "preview": "node ./node_modules/vite/bin/vite.js preview",
     "clean": "rimraf dist",
-    "lint": "eslint .",
-    "prebuild": "node -e \"try{console.log('node',process.version);require('fs').readdirSync('node_modules/vite/dist/node/chunks').slice(0,5).forEach(f=>console.log('vite chunk:',f))}catch(e){console.error('vite chunks missing',e?.message)}\""
+    "lint": "eslint ."
   },
   "engines": {
     "node": "20.19.x"
