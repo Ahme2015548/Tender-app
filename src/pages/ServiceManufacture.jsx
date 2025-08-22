@@ -543,7 +543,10 @@ function ServiceManufactureContent() {
                                     onClick={(e) => {
                                       e.preventDefault();
                                       e.stopPropagation();
-                                      navigate(`/services/edit/${service.id || service.internalId}`);
+                                      const serviceId = service.internalId || service.id;
+                                      if (serviceId) {
+                                        navigate(`/services/edit/${serviceId}`);
+                                      }
                                     }}
                                     title={`تحرير الخدمة: ${service.name}`}
                                   >

@@ -52,7 +52,6 @@ function AddServiceContent() {
   const [foreignSuppliers, setForeignSuppliers] = useState([]);
   const [priceQuotes, setPriceQuotes] = useState([]);
   const [serviceTypes, setServiceTypes] = useState([]);
-  const [deleting, setDeleting] = useState(false);
   const { alertConfig, closeAlert, showSuccess, showError, showConfirm } = useCustomAlert();
 
   // Function to find lowest price quote and update form data
@@ -305,44 +304,6 @@ function AddServiceContent() {
     setShowPriceModal(true);
   };
 
-  const handleDeleteService = async () => {
-    if (!isEditing) return;
-    
-    showConfirm(
-      'هل أنت متأكد من حذف هذه الخدمة؟ سيتم نقلها إلى سلة المهملات ويمكن استرجاعها لاحقاً.',
-      'تأكيد الحذف',
-      async () => {
-        try {
-          setDeleting(true);
-          
-          // Delete service (moves to trash)
-          await ServiceService.deleteService(id);
-
-          // Log activity
-          const currentUser = getCurrentUser();
-          if (currentUser && currentUser.name) {
-            logActivity('delete', `${currentUser.name} حذف الخدمة: ${formData.name}`, 'تم نقل الخدمة إلى سلة المهملات');
-          }
-
-          showSuccess('تم حذف الخدمة بنجاح', 'نجحت العملية');
-          
-          // Dispatch event for other components
-          window.dispatchEvent(new CustomEvent('servicesUpdated'));
-          
-          // Navigate back to services list
-          setTimeout(() => {
-            navigate('/services');
-          }, 1500);
-          
-        } catch (error) {
-          console.error('Error deleting service:', error);
-          showError('فشل في حذف الخدمة', 'خطأ في النظام');
-        } finally {
-          setDeleting(false);
-        }
-      }
-    );
-  };
 
   if (loadingData) {
     return (
@@ -543,33 +504,6 @@ function AddServiceContent() {
                           إلغاء
                         </button>
                       </div>
-                      
-                      {isEditing && (
-                        <button
-                          type="button"
-                          className="btn btn-danger"
-                          onClick={handleDeleteService}
-                          disabled={deleting}
-                          style={{ 
-                            height: '32px', 
-                            width: '80px', 
-                            borderRadius: '6px', 
-                            fontSize: '14px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}
-                        >
-                          {deleting ? (
-                            <ModernSpinner show={true} size="small" />
-                          ) : (
-                            <>
-                              <i className="bi bi-trash me-2"></i>
-                              حذف
-                            </>
-                          )}
-                        </button>
-                      )}
                     </div>
                   </div>
                 </div>

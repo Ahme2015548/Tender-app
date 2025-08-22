@@ -1089,6 +1089,16 @@ function AddTenderContent() {
     }));
   };
 
+  const handlePriceChange = (itemId, newPrice) => {
+    // Allow any positive number for price input
+    const price = Math.max(0, parseFloat(newPrice) || 0);
+    setEditingItem(prev => ({
+      ...prev,
+      unitPrice: Math.round(price),
+      totalPrice: Math.round(price) * (prev.quantity || 1)
+    }));
+  };
+
   const handleConfirmEdit = () => {
     if (editingIndex !== null && editingItem) {
       setTenderItems(prev => prev.map((item, index) => 
@@ -1694,148 +1704,113 @@ function AddTenderContent() {
                                                       e.stopPropagation();
                                                       
                                                       try {
-                                                        console.log('=== DETAILED DEBUGGING ===');
-                                                        console.log('Full item object:', JSON.stringify(item, null, 2));
-                                                        console.log('All item keys:', Object.keys(item));
-                                                        
                                                         const materialInternalId = item.materialInternalId;
                                                         const materialType = item.materialType || 'rawMaterial';
                                                         
-                                                        console.log('Searching for:');
-                                                        console.log('- materialInternalId:', materialInternalId);
-                                                        console.log('- materialType:', materialType);
-                                                        
                                                         let firebaseId = null;
-                                                        let allItems = [];
                                                         
-                                                        // Get the Firebase document ID by searching with internal ID
+                                                        // Clean navigation without debugging noise
                                                         if (materialType === 'rawMaterial') {
-                                                          console.log('Loading raw material...');
                                                           const { RawMaterialService } = await import('../services/rawMaterialService');
-                                                          // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all materials
                                                           let material = await RawMaterialService.getRawMaterialByInternalId(materialInternalId);
                                                           
                                                           if (!material) {
-                                                            // Try matching by Firebase document ID as fallback
                                                             try {
                                                               material = await RawMaterialService.getRawMaterialById(materialInternalId);
                                                             } catch (error) {
-                                                              console.log('Could not find material by Firebase ID, trying name fallback...');
+                                                              // Fallback to name search
+                                                              const allItems = await RawMaterialService.getAllRawMaterials();
+                                                              const displayName = item.materialName || item.name;
+                                                              material = allItems.find(m => m.name === displayName);
                                                             }
                                                           }
                                                           
-                                                          if (!material) {
-                                                            // Last resort: try matching by name (requires full scan)
-                                                            console.log('Using name fallback - loading all raw materials...');
-                                                            const allItems = await RawMaterialService.getAllRawMaterials();
-                                                            const displayName = item.materialName || item.name;
-                                                            material = allItems.find(m => m.name === displayName);
-                                                          }
-                                                          
-                                                          console.log('Found raw material:', material ? 'YES' : 'NO');
                                                           if (material) {
-                                                            console.log('Material details:', { id: material.id, internalId: material.internalId, name: material.name });
-                                                            firebaseId = material.id;
-                                                            navigate(`/raw-materials/edit/${firebaseId}`);
+                                                            navigate(`/raw-materials/edit/${material.id}`);
+                                                            return;
                                                           }
                                                         } else if (materialType === 'localProduct') {
-                                                          console.log('Loading local product...');
                                                           const { LocalProductService } = await import('../services/localProductService');
-                                                          // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all products
                                                           let product = await LocalProductService.getLocalProductByInternalId(materialInternalId);
                                                           
                                                           if (!product) {
-                                                            // Try matching by Firebase document ID as fallback
                                                             try {
                                                               product = await LocalProductService.getLocalProductById(materialInternalId);
                                                             } catch (error) {
-                                                              console.log('Could not find product by Firebase ID, trying name fallback...');
+                                                              // Fallback to name search
+                                                              const allItems = await LocalProductService.getAllLocalProducts();
+                                                              const displayName = item.materialName || item.name;
+                                                              product = allItems.find(p => p.name === displayName);
                                                             }
                                                           }
                                                           
-                                                          if (!product) {
-                                                            // Last resort: try matching by name (requires full scan)
-                                                            console.log('Using name fallback - loading all local products...');
-                                                            const allItems = await LocalProductService.getAllLocalProducts();
-                                                            const displayName = item.materialName || item.name;
-                                                            product = allItems.find(p => p.name === displayName);
-                                                          }
-                                                          
-                                                          console.log('Found local product:', product ? 'YES' : 'NO');
                                                           if (product) {
-                                                            console.log('Product details:', { id: product.id, internalId: product.internalId, name: product.name });
-                                                            firebaseId = product.id;
-                                                            navigate(`/local-products/edit/${firebaseId}`);
+                                                            navigate(`/local-products/edit/${product.id}`);
+                                                            return;
                                                           }
                                                         } else if (materialType === 'foreignProduct') {
-                                                          console.log('Loading foreign product...');
                                                           const { ForeignProductService } = await import('../services/foreignProductService');
-                                                          // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all products
                                                           let product = await ForeignProductService.getForeignProductByInternalId(materialInternalId);
                                                           
                                                           if (!product) {
-                                                            // Try matching by Firebase document ID as fallback
                                                             try {
                                                               product = await ForeignProductService.getForeignProductById(materialInternalId);
                                                             } catch (error) {
-                                                              console.log('Could not find product by Firebase ID, trying name fallback...');
+                                                              // Fallback to name search
+                                                              const allItems = await ForeignProductService.getAllForeignProducts();
+                                                              const displayName = item.materialName || item.name;
+                                                              product = allItems.find(p => p.name === displayName);
                                                             }
                                                           }
                                                           
-                                                          if (!product) {
-                                                            // Last resort: try matching by name (requires full scan)
-                                                            console.log('Using name fallback - loading all foreign products...');
-                                                            const allItems = await ForeignProductService.getAllForeignProducts();
-                                                            const displayName = item.materialName || item.name;
-                                                            product = allItems.find(p => p.name === displayName);
-                                                          }
-                                                          
-                                                          console.log('Found foreign product:', product ? 'YES' : 'NO');
                                                           if (product) {
-                                                            console.log('Product details:', { id: product.id, internalId: product.internalId, name: product.name });
-                                                            firebaseId = product.id;
-                                                            navigate(`/foreign-products/edit/${firebaseId}`);
+                                                            navigate(`/foreign-products/edit/${product.id}`);
+                                                            return;
                                                           }
                                                         } else if (materialType === 'manufacturedProduct') {
-                                                          console.log('Loading manufactured products...');
                                                           const { ManufacturedProductService } = await import('../services/ManufacturedProductService');
-                                                          allItems = await ManufacturedProductService.getAllManufacturedProducts();
-                                                          console.log('Total manufactured products loaded:', allItems.length);
-                                                          console.log('Sample manufactured product IDs:', allItems.slice(0, 3).map(p => ({ id: p.id, internalId: p.internalId, title: p.title })));
-                                                          
-                                                          // Try multiple matching strategies
-                                                          let product = allItems.find(p => p.internalId === materialInternalId);
+                                                          let product = await ManufacturedProductService.getManufacturedProductByInternalId(materialInternalId);
                                                           
                                                           if (!product) {
-                                                            // Try matching by Firebase document ID
-                                                            product = allItems.find(p => p.id === materialInternalId);
+                                                            try {
+                                                              product = await ManufacturedProductService.getManufacturedProductById(materialInternalId);
+                                                            } catch (error) {
+                                                              // Fallback to name search
+                                                              const allItems = await ManufacturedProductService.getAllManufacturedProducts();
+                                                              const displayName = item.materialName || item.name;
+                                                              product = allItems.find(p => p.title === displayName);
+                                                            }
                                                           }
                                                           
-                                                          if (!product) {
-                                                            // Try matching by name
-                                                            product = allItems.find(p => p.title === item.materialName);
-                                                          }
-                                                          
-                                                          console.log('Found manufactured product:', product ? 'YES' : 'NO');
                                                           if (product) {
-                                                            console.log('Product details:', { id: product.id, internalId: product.internalId, title: product.title });
-                                                            firebaseId = product.id;
-                                                            navigate(`/manufactured-products/edit/${firebaseId}`);
+                                                            navigate(`/manufactured-products/edit/${product.id}`);
+                                                            return;
+                                                          }
+                                                        } else if (materialType === 'service') {
+                                                          const { ServiceService } = await import('../services/ServiceService');
+                                                          let service = await ServiceService.getServiceByInternalId(materialInternalId);
+                                                          
+                                                          if (!service) {
+                                                            try {
+                                                              service = await ServiceService.getServiceById(materialInternalId);
+                                                            } catch (error) {
+                                                              // Fallback to name search
+                                                              const allItems = await ServiceService.getAllServices();
+                                                              const displayName = item.materialName || item.name;
+                                                              service = allItems.find(s => s.name === displayName);
+                                                            }
+                                                          }
+                                                          
+                                                          if (service) {
+                                                            navigate(`/services/edit/${service.id}`);
+                                                            return;
                                                           }
                                                         }
                                                         
-                                                        if (!firebaseId) {
-                                                          console.error('=== SEARCH FAILED ===');
-                                                          console.error('Could not find Firebase ID for:', materialInternalId);
-                                                          console.error('Available items in this category:', allItems.map(item => ({ 
-                                                            id: item.id, 
-                                                            internalId: item.internalId, 
-                                                            name: item.name 
-                                                          })));
-                                                          alert(`لا يمكن العثور على هذه المادة\nID: ${materialInternalId}\nType: ${materialType}`);
-                                                        }
+                                                        // If we get here, the item wasn't found
+                                                        alert(`لا يمكن العثور على هذه المادة`);
                                                       } catch (error) {
-                                                        console.error('=== NAVIGATION ERROR ===', error);
+                                                        console.error('Navigation error:', error);
                                                         alert('حدث خطأ أثناء محاولة فتح المادة');
                                                       }
                                                     }}
@@ -2025,9 +2000,29 @@ function AddTenderContent() {
                           </td>
                           
                           <td className="text-center">
-                            <span className="fw-bold text-success">
-                              {Math.round(editingItem.unitPrice)} ريال
-                            </span>
+                            {editingItem.materialType === 'service' ? (
+                              <div className="d-flex align-items-center justify-content-center">
+                                <input
+                                  type="number"
+                                  className="form-control text-center"
+                                  style={{ width: '100px', height: '32px', borderRadius: '6px' }}
+                                  value={Math.round(editingItem.unitPrice)}
+                                  min="0"
+                                  step="1"
+                                  onChange={(e) => handlePriceChange(editingItem.internalId, e.target.value)}
+                                  onBlur={(e) => {
+                                    // Format to whole number when user finishes editing
+                                    const formattedValue = Math.round(Number(e.target.value || 0));
+                                    handlePriceChange(editingItem.internalId, formattedValue);
+                                  }}
+                                />
+                                <span className="ms-2 text-muted">ريال</span>
+                              </div>
+                            ) : (
+                              <span className="fw-bold text-success">
+                                {Math.round(editingItem.unitPrice)} ريال
+                              </span>
+                            )}
                             <div>
                               <small className="text-muted">/{editingItem.materialUnit || editingItem.unit || 'وحدة'}</small>
                             </div>

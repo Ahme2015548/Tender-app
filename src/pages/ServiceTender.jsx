@@ -560,7 +560,10 @@ function ServiceTenderContent() {
                                       onClick={(e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
-                                        navigate(`/services/edit/${service.id || service.internalId}`);
+                                        const serviceId = service.internalId || service.id;
+                                        if (serviceId) {
+                                          navigate(`/services/edit/${serviceId}`);
+                                        }
                                       }}
                                       title={`تحرير الخدمة: ${service.name}`}
                                     >
@@ -684,7 +687,10 @@ function ServiceTenderContent() {
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    navigate(`/services/edit/${item.id || item.internalId}`);
+                                    const serviceId = item.internalId || item.id;
+                                    if (serviceId) {
+                                      navigate(`/services/edit/${serviceId}`);
+                                    }
                                   }}
                                   title={`تحرير الخدمة: ${item.name}`}
                                 >
