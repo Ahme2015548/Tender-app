@@ -16,15 +16,22 @@
   if (isVercel) {
     console.log("🚨 Vercel environment detected - using Webpack build to avoid Vite chunks issue!");
     
+    // 🧠 SENIOR REACT: Temporarily modify package.json to remove "type": "module" for webpack compatibility
+    console.log("📝 Temporarily modifying package.json for webpack compatibility...");
+    const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+    const originalType = packageJson.type;
+    
     try {
       console.log("🔧 Building with Webpack + Babel (bypassing Vite completely)...");
+      delete packageJson.type; // Remove "type": "module" temporarily
+      fs.writeFileSync('package.json', JSON.stringify(packageJson, null, 2));
       
       // Install webpack and babel for alternative build
       console.log("📦 Installing webpack dependencies...");
       execSync('npm install --no-save webpack@5 webpack-cli@5 babel-loader@9 @babel/core@7 @babel/preset-react@7 @babel/preset-env@7 css-loader@6 style-loader@3 sass-loader@13 sass@1 html-webpack-plugin@5 copy-webpack-plugin@11', { stdio: 'inherit', timeout: 180000 });
       console.log("✅ Webpack dependencies installed successfully");
       
-      // Create webpack config for emergency build
+      // Create webpack config for emergency build (CommonJS format after removing type: module)
       const webpackConfig = `const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const CopyPlugin = require('copy-webpack-plugin');
@@ -39,7 +46,11 @@ module.exports = {
     publicPath: '/'
   },
   resolve: {
-    extensions: ['.js', '.jsx']
+    extensions: ['.js', '.jsx', '.ts', '.tsx'],
+    fullySpecified: false,
+    alias: {
+      '@': path.resolve(__dirname, 'src')
+    }
   },
   module: {
     rules: [
@@ -55,11 +66,25 @@ module.exports = {
       },
       {
         test: /\\.(css|scss)$/,
-        use: ['style-loader', 'css-loader', 'sass-loader']
+        use: [
+          'style-loader',
+          'css-loader',
+          {
+            loader: 'sass-loader',
+            options: {
+              sassOptions: {
+                includePaths: ['./src/assets/css']
+              }
+            }
+          }
+        ]
       },
       {
         test: /\\.(png|jpg|jpeg|gif|svg|woff|woff2|eot|ttf)$/,
-        type: 'asset/resource'
+        type: 'asset/resource',
+        generator: {
+          filename: 'images/[name][ext]'
+        }
       }
     ]
   },
@@ -70,7 +95,8 @@ module.exports = {
     }),
     new CopyPlugin({
       patterns: [
-        { from: 'public', to: '.', noErrorOnMissing: true }
+        { from: 'public', to: '.', noErrorOnMissing: true },
+        { from: 'src/assets/images', to: 'images', noErrorOnMissing: true }
       ]
     })
   ]
@@ -81,11 +107,30 @@ module.exports = {
       // Run webpack build
       execSync('npx webpack --config webpack.config.js', { stdio: 'inherit', timeout: 300000 });
       
+      // 🧠 SENIOR REACT: Restore original package.json
+      console.log("📝 Restoring original package.json...");
+      if (originalType) {
+        packageJson.type = originalType;
+        fs.writeFileSync('package.json', JSON.stringify(packageJson, null, 2));
+      }
+      
       console.log("✅ Webpack build completed successfully!");
       process.exit(0);
       
     } catch (webpackErr) {
       console.log("❌ Webpack build failed:", webpackErr?.message);
+      
+      // 🧠 SENIOR REACT: Restore package.json even on failure
+      try {
+        console.log("📝 Restoring original package.json after failure...");
+        const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+        if (originalType && !packageJson.type) {
+          packageJson.type = originalType;
+          fs.writeFileSync('package.json', JSON.stringify(packageJson, null, 2));
+        }
+      } catch (restoreErr) {
+        console.error("⚠️ Could not restore package.json:", restoreErr.message);
+      }
       
       // 🧠 SENIOR REACT: On Vercel, if webpack fails, force exit with error
       // Don't fall through to broken Vite chunks
