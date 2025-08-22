@@ -10,11 +10,21 @@
   const viteChunksPath = 'node_modules/vite/dist/node/chunks';
   const viteNodePath = 'node_modules/vite/dist/node';
   
-  // Check if this is Vercel - use Webpack immediately if on Vercel
+  // Check if this is Vercel - try Vite first, fallback to webpack if needed
   const isVercel = process.env.VERCEL || process.env.VERCEL_ENV;
   
   if (isVercel) {
-    console.log("🚨 Vercel environment detected - using Webpack build to avoid Vite chunks issue!");
+    console.log("🚨 Vercel environment detected - attempting Vite build first!");
+    
+    try {
+      console.log("🚀 Attempting Vite build on Vercel...");
+      execSync('npx vite build', { stdio: 'inherit', timeout: 300000 });
+      console.log("✅ Vite build completed successfully on Vercel!");
+      return;
+    } catch (error) {
+      console.log("❌ Vite build failed on Vercel, falling back to webpack...");
+      console.log("Error:", error.message);
+    }
     
     // 🧠 SENIOR REACT: Temporarily modify package.json to remove "type": "module" for webpack compatibility
     console.log("📝 Temporarily modifying package.json for webpack compatibility...");

@@ -536,7 +536,7 @@ function ManufacturedForeignProductsContent() {
                   </a>
                 </li>
                 <li className="breadcrumb-item text-primary">
-                  بنود المنتجات المصنعة
+                  بنود المنتج المصنعة
                 </li>
                 <li className="breadcrumb-item text-secondary" aria-current="page">منتجات أجنبية</li>
               </ol>

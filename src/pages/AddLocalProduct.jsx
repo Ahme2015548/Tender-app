@@ -1118,7 +1118,7 @@ function AddLocalProductContent() {
                               <div className="card-body" style={{ padding: '30px' }}>
                                 <div style={{ minHeight: '625px', direction: 'ltr' }}>
                                   {/* Chart Container */}
-                                  <div style={{ width: '100%', height: '605px', position: 'relative' }}>
+                                  <div style={{ width: '100%', height: '605px', position: 'relative', overflowX: 'auto' }}>
                                     {(() => {
                                       // Calculate chart dimensions first
                                       const prices = priceQuotes.map(q => parseFloat(q.price) || 0);
@@ -1129,7 +1129,7 @@ function AddLocalProductContent() {
                                       const chartWidth = Math.max(minChartWidth, calculatedWidth);
                                       
                                       return (
-                                        <svg width="100%" height="100%" viewBox={`0 0 ${chartWidth + 160} 605`} style={{ direction: 'ltr' }}>
+                                        <svg width="100%" height="100%" viewBox={`0 0 ${chartWidth + 160} 605`} style={{ direction: 'ltr', minWidth: `${chartWidth + 160}px` }}>
                                           {/* Modern gradient background */}
                                           <defs>
                                             <linearGradient id="chartBgLocal" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -1554,7 +1554,7 @@ function AddLocalProductContent() {
                                               {/* Modern chart title */}
                                               <text
                                                 x={chartWidth / 2}
-                                                y={30}
+                                                y={-10}
                                                 textAnchor="middle"
                                                 fontSize="16"
                                                 fill="url(#bestPriceGradientLocal)"

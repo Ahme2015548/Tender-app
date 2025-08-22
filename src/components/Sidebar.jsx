@@ -12,6 +12,33 @@ export default function Sidebar({ isCollapsed }) {
   const [isSuppliersOpen, setIsSuppliersOpen] = useState(false);
   const [isHROpen, setIsHROpen] = useState(false);
 
+  // Listen for Firebase settings changes
+  useEffect(() => {
+    const unsubscribe = userSettingsService.addListener((settings) => {
+      // Update menu orders when Firebase settings change
+      if (settings['sidebar-menu-items']) {
+        setMenuItems(settings['sidebar-menu-items']);
+      }
+      if (settings['sidebar-tender-sub-items']) {
+        setTenderSubItems(settings['sidebar-tender-sub-items']);
+      }
+      if (settings['sidebar-tender-detail-sub-items']) {
+        setTenderDetailSubItems(settings['sidebar-tender-detail-sub-items']);
+      }
+      if (settings['sidebar-supplier-sub-items']) {
+        setSupplierSubItems(settings['sidebar-supplier-sub-items']);
+      }
+      if (settings['sidebar-hr-sub-items']) {
+        setHRSubItems(settings['sidebar-hr-sub-items']);
+      }
+      if (settings['sidebar-sort-enabled'] !== undefined) {
+        setIsSortEnabled(settings['sidebar-sort-enabled']);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   // Update active item based on current route
   useEffect(() => {
     const path = location.pathname;
@@ -29,6 +56,9 @@ export default function Sidebar({ isCollapsed }) {
       setIsTenderItemsDetailsOpen(true); // Auto-expand the treeview
     } else if (path === '/manufactured-products') {
       setActiveItem('manufactured-product');
+      setIsTenderItemsDetailsOpen(true); // Auto-expand the treeview
+    } else if (path === '/services') {
+      setActiveItem('services');
       setIsTenderItemsDetailsOpen(true); // Auto-expand the treeview
     } else if (path === '/suppliers/local') {
       setActiveItem('local-suppliers');
@@ -88,7 +118,8 @@ export default function Sidebar({ isCollapsed }) {
     { id: 'raw-materials', type: 'sub', component: 'raw-materials' },
     { id: 'local-product', type: 'sub', component: 'local-product' },
     { id: 'imported-product', type: 'sub', component: 'imported-product' },
-    { id: 'manufactured-product', type: 'sub', component: 'manufactured-product' }
+    { id: 'manufactured-product', type: 'sub', component: 'manufactured-product' },
+    { id: 'services', type: 'sub', component: 'services' }
   ];
 
   const defaultSupplierSubItems = [
@@ -100,9 +131,14 @@ export default function Sidebar({ isCollapsed }) {
     { id: 'employees', type: 'sub', component: 'employees' }
   ];
 
-  // Use default order (localStorage eliminated)
+  // Use saved order from Firebase with persistence
   const loadSavedOrder = (key, defaultItems) => {
-    return defaultItems;
+    try {
+      return userSettingsService.getSetting(key, defaultItems);
+    } catch (error) {
+      console.warn(`Error loading saved order for ${key}:`, error);
+      return defaultItems;
+    }
   };
 
   // Initialize state with saved order
@@ -126,26 +162,49 @@ export default function Sidebar({ isCollapsed }) {
     loadSavedOrder('sidebar-hr-sub-items', defaultHRSubItems)
   );
 
-  // localStorage eliminated - no persistence needed
 
   // Reset function to restore default order (optional)
-  const resetSidebarOrder = () => {
+  const resetSidebarOrder = async () => {
     setMenuItems(defaultMenuItems);
     setTenderSubItems(defaultTenderSubItems);
     setTenderDetailSubItems(defaultTenderDetailSubItems);
     setSupplierSubItems(defaultSupplierSubItems);
     setHRSubItems(defaultHRSubItems);
-    // localStorage eliminated('sidebar-menu-items');
-    // localStorage eliminated('sidebar-tender-sub-items');
-    // localStorage eliminated('sidebar-tender-detail-sub-items');
-    // localStorage eliminated('sidebar-supplier-sub-items');
-    // localStorage eliminated('sidebar-hr-sub-items');
+    
+    // Remove from Firebase
+    const settingsToReset = {
+      'sidebar-menu-items': defaultMenuItems,
+      'sidebar-tender-sub-items': defaultTenderSubItems,
+      'sidebar-tender-detail-sub-items': defaultTenderDetailSubItems,
+      'sidebar-supplier-sub-items': defaultSupplierSubItems,
+      'sidebar-hr-sub-items': defaultHRSubItems
+    };
+    
+    await userSettingsService.setSettings(settingsToReset);
   };
 
-  // Sort functionality toggle state (localStorage eliminated)
-  const [isSortEnabled, setIsSortEnabled] = useState(false);
+  // Sort functionality toggle state with Firebase persistence
+  const [isSortEnabled, setIsSortEnabled] = useState(() => {
+    return userSettingsService.getSetting('sidebar-sort-enabled', false);
+  });
 
-  // localStorage eliminated - no persistence needed
+  // Save sort state to Firebase
+  useEffect(() => {
+    if (userSettingsService.currentUserId) {
+      userSettingsService.setSetting('sidebar-sort-enabled', isSortEnabled);
+    }
+  }, [isSortEnabled]);
+
+  // Save order to Firebase for persistence
+  const saveOrder = async (key, items) => {
+    try {
+      console.log(`💾 Saving order for ${key}:`, items);
+      await userSettingsService.setSetting(key, items);
+      console.log(`✅ Successfully saved order for ${key}`);
+    } catch (error) {
+      console.warn(`❌ Error saving order for ${key}:`, error);
+    }
+  };
 
   // Toggle sort functionality
   const toggleSortFunctionality = () => {
@@ -184,6 +243,7 @@ export default function Sidebar({ isCollapsed }) {
       newMenuItems.splice(targetIndex, 0, draggedItem);
       
       setMenuItems(newMenuItems);
+      saveOrder('sidebar-menu-items', newMenuItems);
     } else if (targetItemType === 'tender-sub') {
       const newSubItems = [...tenderSubItems];
       const draggedIndex = newSubItems.findIndex(item => item.id === draggedItem.id);
@@ -193,6 +253,7 @@ export default function Sidebar({ isCollapsed }) {
       newSubItems.splice(targetIndex, 0, draggedItem);
       
       setTenderSubItems(newSubItems);
+      saveOrder('sidebar-tender-sub-items', newSubItems);
     } else if (targetItemType === 'tender-detail-sub') {
       const newSubItems = [...tenderDetailSubItems];
       const draggedIndex = newSubItems.findIndex(item => item.id === draggedItem.id);
@@ -202,6 +263,7 @@ export default function Sidebar({ isCollapsed }) {
       newSubItems.splice(targetIndex, 0, draggedItem);
       
       setTenderDetailSubItems(newSubItems);
+      saveOrder('sidebar-tender-detail-sub-items', newSubItems);
     } else if (targetItemType === 'supplier-sub') {
       const newSubItems = [...supplierSubItems];
       const draggedIndex = newSubItems.findIndex(item => item.id === draggedItem.id);
@@ -211,15 +273,21 @@ export default function Sidebar({ isCollapsed }) {
       newSubItems.splice(targetIndex, 0, draggedItem);
       
       setSupplierSubItems(newSubItems);
+      saveOrder('sidebar-supplier-sub-items', newSubItems);
     } else if (targetItemType === 'hr-sub') {
+      console.log('🔄 HR sub-items drag and drop:', { draggedItem, targetItem });
       const newSubItems = [...hrSubItems];
       const draggedIndex = newSubItems.findIndex(item => item.id === draggedItem.id);
       const targetIndex = newSubItems.findIndex(item => item.id === targetItem.id);
       
+      console.log('📍 HR drag indices:', { draggedIndex, targetIndex });
+      
       newSubItems.splice(draggedIndex, 1);
       newSubItems.splice(targetIndex, 0, draggedItem);
       
+      console.log('💾 HR saving new order:', newSubItems);
       setHRSubItems(newSubItems);
+      saveOrder('sidebar-hr-sub-items', newSubItems);
     }
 
     setDraggedItem(null);
@@ -682,7 +750,8 @@ export default function Sidebar({ isCollapsed }) {
       'raw-materials': { to: '/raw-materials', icon: 'bi-gear', text: 'مواد خام' },
       'local-product': { to: '/local-products', icon: 'bi-house', text: 'منتج محلي' },
       'imported-product': { to: '/foreign-products', icon: 'bi-globe', text: 'منتج مستورد' },
-      'manufactured-product': { to: '/manufactured-products', icon: 'bi-tools', text: 'منتج مصنع' }
+      'manufactured-product': { to: '/manufactured-products', icon: 'bi-tools', text: 'منتجات المصنع' },
+      'services': { to: '/services', icon: 'bi-wrench-adjustable-circle', text: 'الخدمات' }
     };
 
     const config = subItemConfig[subItem.id];
@@ -703,8 +772,8 @@ export default function Sidebar({ isCollapsed }) {
       handleDrop(e, subItem, 'tender-detail-sub');
     };
 
-    // raw-materials, local-product, imported-product, and manufactured-product have links
-    const hasLink = subItem.id === 'raw-materials' || subItem.id === 'local-product' || subItem.id === 'imported-product' || subItem.id === 'manufactured-product';
+    // raw-materials, local-product, imported-product, manufactured-product, and services have links
+    const hasLink = subItem.id === 'raw-materials' || subItem.id === 'local-product' || subItem.id === 'imported-product' || subItem.id === 'manufactured-product' || subItem.id === 'services';
 
     return (
       <li 

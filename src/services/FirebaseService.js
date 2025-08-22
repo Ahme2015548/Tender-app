@@ -274,7 +274,8 @@ export class FirebaseService {
           id: docSnap.id,
           ...data,
           createdAt: data.createdAt?.toDate(),
-          updatedAt: data.updatedAt?.toDate()
+          updatedAt: data.updatedAt?.toDate(),
+          submissionDeadline: data.submissionDeadline?.toDate ? data.submissionDeadline.toDate() : data.submissionDeadline
         };
       } else {
         return null;
@@ -315,7 +316,8 @@ export class FirebaseService {
           id: doc.id,
           ...data,
           createdAt: data.createdAt?.toDate(),
-          updatedAt: data.updatedAt?.toDate()
+          updatedAt: data.updatedAt?.toDate(),
+          submissionDeadline: data.submissionDeadline?.toDate ? data.submissionDeadline.toDate() : data.submissionDeadline
         };
       });
 
@@ -354,7 +356,8 @@ export class FirebaseService {
           id: doc.id,
           ...data,
           createdAt: data.createdAt?.toDate(),
-          updatedAt: data.updatedAt?.toDate()
+          updatedAt: data.updatedAt?.toDate(),
+          submissionDeadline: data.submissionDeadline?.toDate ? data.submissionDeadline.toDate() : data.submissionDeadline
         };
       });
 

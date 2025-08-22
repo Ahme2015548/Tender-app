@@ -9,6 +9,85 @@ import { usePagination } from '../hooks/usePagination';
 import { useDateFormat } from '../hooks/useDateFormat';
 import Pagination from './Pagination';
 
+// 🚀 SENIOR REACT: Beautiful Countdown Timer Component
+const CountdownTimer = ({ submissionDeadline, tenderId }) => {
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, expired: false });
+
+  const calculateTimeLeft = () => {
+    if (!submissionDeadline) {
+      return { days: 0, hours: 0, minutes: 0, expired: true, invalid: true };
+    }
+
+    const now = new Date().getTime();
+    const deadline = new Date(submissionDeadline).getTime();
+    const difference = deadline - now;
+
+    if (difference <= 0) {
+      return { days: 0, hours: 0, minutes: 0, expired: true };
+    }
+
+    const days = Math.floor(difference / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60));
+
+    return { days, hours, minutes, expired: false };
+  };
+
+  useEffect(() => {
+    // Update immediately
+    setTimeLeft(calculateTimeLeft());
+
+    // Update every minute
+    const interval = setInterval(() => {
+      setTimeLeft(calculateTimeLeft());
+    }, 60000); // Update every minute
+
+    return () => clearInterval(interval);
+  }, [submissionDeadline]);
+
+  if (timeLeft.invalid) {
+    return (
+      <span className="badge bg-secondary text-white" style={{ fontSize: '11px', fontWeight: '600' }}>
+        لا يوجد موعد
+      </span>
+    );
+  }
+
+  if (timeLeft.expired) {
+    return (
+      <span className="badge bg-danger text-white" style={{ 
+        fontSize: '11px', 
+        fontWeight: '600',
+        animation: 'pulse 2s infinite',
+        padding: '6px 10px'
+      }}>
+        مغلقة للتقديم
+      </span>
+    );
+  }
+
+  const formatNumber = (num) => num.toString().padStart(2, '0');
+
+  return (
+    <div className="countdown-container" style={{ textAlign: 'center' }}>
+      <div className="countdown-timer" style={{
+        background: 'transparent',
+        color: '#dc3545',
+        padding: '8px 12px',
+        borderRadius: '8px',
+        fontFamily: 'monospace',
+        fontSize: '21px',
+        fontWeight: 'bold',
+        minWidth: '100px'
+      }}>
+        <div style={{ letterSpacing: '1px', color: '#dc3545' }}>
+          {formatNumber(timeLeft.days)}:{formatNumber(timeLeft.hours)}:{formatNumber(timeLeft.minutes)}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const TendersListFixed = ({ refreshTrigger }) => {
   const navigate = useNavigate();
   
@@ -44,15 +123,37 @@ const TendersListFixed = ({ refreshTrigger }) => {
 
   // Simple data loading function
   const loadTenders = async () => {
+    console.log('🚨 FUNCTION START: loadTenders called');
     try {
       setLoading(true);
       setError(null);
       console.log('Loading tenders...');
       
+      console.log('🚨 ABOUT TO CALL TenderService.getAllTenders()');
       const data = await TenderService.getAllTenders();
-      console.log('Tenders loaded:', data.length);
+      console.log('🚨 RETURNED FROM TenderService.getAllTenders()');
+      console.log('🔍 STEP 1: Tenders loaded:', data ? data.length : 'NULL');
+      console.log('🔍 STEP 2: Data is array:', Array.isArray(data));
+      console.log('🔍 STEP 3: Data type:', typeof data);
       
+      // Ultra-safe debugging
+      try {
+        if (data && Array.isArray(data) && data.length > 0) {
+          console.log('🔍 STEP 4: First tender exists');
+          const tender = data[0];
+          console.log('🔍 STEP 5: Accessing submissionDeadline...');
+          console.log('🔍 SUBMISSION DEADLINE:', tender ? tender.submissionDeadline : 'NO TENDER');
+          console.log('🔍 SUBMISSION DEADLINE TYPE:', tender ? typeof tender.submissionDeadline : 'NO TENDER');
+        } else {
+          console.log('🔍 STEP 4: No tender data - data:', data);
+        }
+      } catch (debugError) {
+        console.error('🔍 DEBUG ERROR:', debugError);
+      }
+      
+      console.log('🔍 STEP 6: About to setTenders...');
       setTenders(data);
+      console.log('🔍 STEP 7: setTenders completed');
     } catch (err) {
       console.error('Error loading tenders:', err);
       setError(err.message || 'فشل في تحميل المناقصات');
@@ -117,6 +218,10 @@ const TendersListFixed = ({ refreshTrigger }) => {
   };
 
   const getStatusBadge = (tender) => {
+    if (!tender.submissionDeadline) {
+      return <span className="badge bg-warning">لا يوجد موعد</span>;
+    }
+    
     const now = new Date();
     const submissionDeadline = new Date(tender.submissionDeadline);
     
@@ -230,19 +335,19 @@ const TendersListFixed = ({ refreshTrigger }) => {
                   <th className="text-center">التكلفة التقديرية</th>
                   <th className="text-center">جهة المناقصة</th>
                   <th className="text-center">موعد انتهاء التقديم</th>
-                  <th className="text-center">الحالة</th>
+                  <th className="text-center">الوقت المتبقي</th>
                   <th className="text-center" style={{ width: '120px', paddingLeft: '40px' }}>الإجراءات</th>
                 </tr>
               </thead>
               <tbody>
                 {paginatedTenders.map((tender, index) => (
                   <tr key={tender.internalId || tender.id || `tender-${index}`}>
-                    <td className="text-center">
+                    <td className="text-center align-middle">
                       <span className="fw-bold text-muted" style={{ fontSize: '14px' }}>
                         {(currentPage - 1) * itemsPerPage + index + 1}
                       </span>
                     </td>
-                    <td className="text-center">
+                    <td className="text-center align-middle">
                       <button
                         className="btn btn-link p-0 fw-bold text-primary tender-title-btn"
                         onClick={() => {
@@ -266,15 +371,22 @@ const TendersListFixed = ({ refreshTrigger }) => {
                         {tender.title}
                       </button>
                     </td>
-                    <td className="text-center">
+                    <td className="text-center align-middle">
                       <span className="badge bg-success text-white">
                         {(tender.estimatedValue || 0).toLocaleString('en-US')} ر.س
                       </span>
                     </td>
-                    <td className="text-center">{tender.entity}</td>
-                    <td className="text-center">{formatDate(tender.submissionDeadline)}</td>
-                    <td className="text-center">{getStatusBadge(tender)}</td>
-                    <td className="text-center" style={{ paddingLeft: '40px' }}>
+                    <td className="text-center align-middle">{tender.entity}</td>
+                    <td className="text-center align-middle">
+                      {tender.submissionDeadline ? formatDate(tender.submissionDeadline) : 'لا يوجد تاريخ'}
+                    </td>
+                    <td className="text-center align-middle">
+                      <CountdownTimer 
+                        submissionDeadline={tender.submissionDeadline} 
+                        tenderId={tender.id}
+                      />
+                    </td>
+                    <td className="text-center align-middle" style={{ paddingLeft: '40px' }}>
                       <div className="btn-group btn-group-sm">
                         <button
                           className="btn btn-outline-primary"

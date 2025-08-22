@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { SupplierService } from '../services/supplierService';
 import { UniqueValidationService } from '../services/uniqueValidationService';
 import { useActivity } from './ActivityManager';
+import { GlobalCitySelect } from './GlobalSettingsComponents';
 
 const SupplierForm = ({ supplier, onSave, onCancel }) => {
   const [formData, setFormData] = useState({
@@ -182,13 +183,12 @@ const SupplierForm = ({ supplier, onSave, onCancel }) => {
 
                 <div className="col-md-6 mb-3">
                   <label className="form-label">المدينة</label>
-                  <input
-                    type="text"
-                    className="form-control"
+                  <GlobalCitySelect
                     name="city"
                     value={formData.city}
                     onChange={handleChange}
-                    placeholder="المدينة"
+                    placeholder="اختر المدينة"
+                    showRegion={true}
                   />
                 </div>
 

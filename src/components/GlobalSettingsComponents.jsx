@@ -282,6 +282,157 @@ export const GlobalUnitSelect = memo(({
 GlobalUnitSelect.displayName = 'GlobalUnitSelect';
 
 /**
+ * 🏙️ Global City Selector  
+ * Uses direct SettingsService calls for now until SettingsContext hooks are implemented
+ */
+export const GlobalCitySelect = memo(({
+  value = '',
+  onChange,
+  onBlur,
+  name = 'city',
+  required = false,
+  disabled = false,
+  placeholder = 'اختر المدينة',
+  className = 'form-select',
+  style = {},
+  showDescription = false,
+  showRegion = false,
+  'data-testid': testId,
+  ...props
+}) => {
+  const [cities, setCities] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+
+  // Load cities from SettingsService
+  React.useEffect(() => {
+    const loadCities = async () => {
+      try {
+        setLoading(true);
+        const { SettingsService } = await import('../services/settingsService');
+        const citiesData = await SettingsService.getAllCities();
+        setCities(citiesData);
+        setError(null);
+      } catch (err) {
+        console.error('Error loading cities:', err);
+        setError('فشل في تحميل المدن');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadCities();
+  }, []);
+
+  // Memoized options to prevent unnecessary re-renders
+  const options = React.useMemo(() => {
+    return cities.map(city => ({
+      value: city.name,
+      label: city.name,
+      description: city.description,
+      region: city.region,
+      isDefault: city.isDefault
+    }));
+  }, [cities]);
+
+  // Show loading state
+  if (loading) {
+    return (
+      <select 
+        className={className}
+        style={style}
+        disabled={true}
+        {...props}
+      >
+        <option value="">جاري تحميل المدن...</option>
+      </select>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div>
+        <select 
+          className={`${className} is-invalid`}
+          style={style}
+          disabled={true}
+          {...props}
+        >
+          <option value="">خطأ في تحميل المدن</option>
+        </select>
+        <div className="invalid-feedback">
+          {error}
+        </div>
+      </div>
+    );
+  }
+
+  // Show empty state if no cities available
+  if (options.length === 0) {
+    return (
+      <div>
+        <select 
+          className={className}
+          style={style}
+          disabled={true}
+          {...props}
+        >
+          <option value="">لا توجد مدن متاحة</option>
+        </select>
+        <small className="form-text text-muted">
+          يرجى إضافة مدن من صفحة الإعدادات
+        </small>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <select
+        name={name}
+        value={value}
+        onChange={onChange}
+        onBlur={onBlur}
+        required={required}
+        disabled={disabled}
+        className={className}
+        style={style}
+        data-testid={testId}
+        aria-label="اختيار المدينة"
+        {...props}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((option) => (
+          <option 
+            key={option.value} 
+            value={option.value}
+            title={showDescription && option.description ? option.description : (showRegion && option.region ? option.region : undefined)}
+          >
+            {option.label} {showRegion && option.region ? ` - ${option.region}` : ''}
+          </option>
+        ))}
+      </select>
+      
+      {/* Real-time update indicator */}
+      {options.length > 0 && (
+        <div className="d-flex justify-content-between align-items-center mt-1">
+          <small className="form-text text-muted">
+            {options.length} مدينة متاحة
+          </small>
+          <small className="form-text text-success" style={{ fontSize: '10px' }}>
+            <i className="bi bi-database me-1"></i>
+            متصل
+          </small>
+        </div>
+      )}
+    </div>
+  );
+});
+
+GlobalCitySelect.displayName = 'GlobalCitySelect';
+
+/**
  * 🔄 Settings Sync Status Component
  * Shows real-time connection status and last update time
  */

@@ -60,7 +60,8 @@
       "Bash(fuser:*)",
       "Bash(npm --version)",
       "Bash(npm outdated)",
-      "Bash(npm update)"
+      "Bash(npm update)",
+      "Bash(VERCEL=true npm run build)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",

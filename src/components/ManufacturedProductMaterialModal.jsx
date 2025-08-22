@@ -98,7 +98,7 @@ const ManufacturedProductMaterialModal = ({
     // Add to manufactured product
     onMaterialAdd(materialItem);
     
-    showSuccess(`تم إضافة ${materialItem.name} كمكون للمنتج المصنع`, 'تمت الإضافة');
+    showSuccess(`تم إضافة ${materialItem.name} كمكون لمنتجات المصنع`, 'تمت الإضافة');
     
     // Reset and close
     setShowQuantityModal(false);

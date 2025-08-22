@@ -92,7 +92,7 @@ export class ManufacturedProductService {
       return products;
     } catch (error) {
       console.error('❌ Error loading manufactured products:', error);
-      throw new Error(`فشل في تحميل المنتجات المصنعة: ${error.message}`);
+      throw new Error(`فشل في تحميل المنتج المصنعة: ${error.message}`);
     }
   }
 
@@ -250,7 +250,7 @@ export class ManufacturedProductService {
       return filtered;
     } catch (error) {
       console.error('❌ Error searching manufactured products:', error);
-      throw new Error(`فشل في البحث عن المنتجات المصنعة: ${error.message}`);
+      throw new Error(`فشل في البحث عن المنتج المصنعة: ${error.message}`);
     }
   }
 
@@ -285,7 +285,7 @@ export class ManufacturedProductService {
       return products;
     } catch (error) {
       console.error('❌ Error loading manufactured products by status:', error);
-      throw new Error(`فشل في تحميل المنتجات المصنعة: ${error.message}`);
+      throw new Error(`فشل في تحميل المنتج المصنعة: ${error.message}`);
     }
   }
 

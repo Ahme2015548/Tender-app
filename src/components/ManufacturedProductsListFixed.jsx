@@ -58,7 +58,7 @@ const ManufacturedProductsListFixed = ({ refreshTrigger }) => {
       setProducts(data);
     } catch (err) {
       console.error('Error loading manufactured products:', err);
-      setError(err.message || 'فشل في تحميل المنتجات المصنعة');
+      setError(err.message || 'فشل في تحميل المنتج المصنعة');
     } finally {
       setLoading(false);
     }
@@ -172,7 +172,7 @@ const ManufacturedProductsListFixed = ({ refreshTrigger }) => {
           <div className="spinner-border text-primary" role="status">
             <span className="visually-hidden">جار التحميل...</span>
           </div>
-          <p className="mt-3 text-muted">جار تحميل بيانات المنتجات المصنعة...</p>
+          <p className="mt-3 text-muted">جار تحميل بيانات المنتج المصنعة...</p>
         </div>
       </div>
     );
@@ -217,7 +217,7 @@ const ManufacturedProductsListFixed = ({ refreshTrigger }) => {
                 <input
                   type="text"
                   className="form-control shadow-sm border-1"
-                  placeholder="البحث في المنتجات المصنعة..."
+                  placeholder="البحث في المنتج المصنعة..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   style={{ 

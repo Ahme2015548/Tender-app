@@ -345,7 +345,7 @@ function ManufacturedProductTenderContent() {
       
     } catch (error) {
       console.error('Error in handleConfirmQuantities:', error);
-      showError('فشل في إضافة المنتجات المصنعة للمناقصة', 'خطأ في النظام');
+      showError('فشل في إضافة المنتج المصنعة للمناقصة', 'خطأ في النظام');
     }
   };
 
@@ -362,7 +362,7 @@ function ManufacturedProductTenderContent() {
     return (
       <ModernSpinner 
         show={true} 
-        message="جار تحميل بيانات المنتجات المصنعة..." 
+        message="جار تحميل بيانات المنتج المصنعة..." 
         overlay={false}
       />
     );
@@ -447,7 +447,7 @@ function ManufacturedProductTenderContent() {
                             <input
                               type="text"
                               className="form-control shadow-sm border-1"
-                              placeholder="البحث في المنتجات المصنعة..."
+                              placeholder="البحث في المنتج المصنعة..."
                               value={searchTerm}
                               onChange={(e) => setSearchTerm(e.target.value)}
                               style={{ 

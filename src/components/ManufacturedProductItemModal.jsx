@@ -53,7 +53,7 @@ const ManufacturedProductItemModal = ({
                }}>
             <h5 className="modal-title fw-bold text-white">
               <i className="bi bi-tools me-2"></i>
-              اختر نوع المكون للمنتج المصنع
+              اختر نوع المكون لمنتجات المصنع
             </h5>
             <button 
               type="button" 

@@ -102,16 +102,8 @@ export class TenderService {
       errors.entity = 'الجهة مطلوبة';
     }
 
-    // Date validations
-    if (tenderData.submissionDeadline) {
-      const deadline = new Date(tenderData.submissionDeadline);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      if (deadline < today) {
-        errors.submissionDeadline = 'تاريخ التسليم يجب أن يكون في المستقبل';
-      }
-    }
+    // Date validations - Allow both past and future dates for tender deadlines
+    // No date validation needed - users can create tenders with past or future deadlines
 
     // Numeric validations
     if (tenderData.estimatedValue !== undefined && tenderData.estimatedValue !== '') {
