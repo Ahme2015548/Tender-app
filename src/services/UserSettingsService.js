@@ -86,7 +86,38 @@ export class UserSettingsService extends FirebaseService {
         
         // Display preferences
         showHelpTips: true,
-        compactMode: false
+        compactMode: false,
+        
+        // Sidebar preferences
+        'sidebar-sort-enabled': false,
+        'sidebar-menu-items': [
+          { id: 'dashboard', type: 'main', component: 'dashboard' },
+          { id: 'tenders', type: 'treeview', component: 'tenders' },
+          { id: 'tender-details', type: 'treeview', component: 'tender-details' },
+          { id: 'suppliers', type: 'treeview', component: 'suppliers' },
+          { id: 'clients', type: 'main', component: 'clients' },
+          { id: 'companies', type: 'main', component: 'companies' },
+          { id: 'hr', type: 'treeview', component: 'hr' }
+        ],
+        'sidebar-tender-sub-items': [
+          { id: 'list', type: 'sub', component: 'list' },
+          { id: 'add', type: 'sub', component: 'add' },
+          { id: 'tracking', type: 'sub', component: 'tracking' }
+        ],
+        'sidebar-tender-detail-sub-items': [
+          { id: 'raw-materials', type: 'sub', component: 'raw-materials' },
+          { id: 'local-product', type: 'sub', component: 'local-product' },
+          { id: 'imported-product', type: 'sub', component: 'imported-product' },
+          { id: 'manufactured-product', type: 'sub', component: 'manufactured-product' },
+          { id: 'services', type: 'sub', component: 'services' }
+        ],
+        'sidebar-supplier-sub-items': [
+          { id: 'local-suppliers', type: 'sub', component: 'local-suppliers' },
+          { id: 'foreign-suppliers', type: 'sub', component: 'foreign-suppliers' }
+        ],
+        'sidebar-hr-sub-items': [
+          { id: 'employees', type: 'sub', component: 'employees' }
+        ]
       };
 
       const settingsDoc = {

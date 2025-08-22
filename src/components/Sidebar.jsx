@@ -184,14 +184,32 @@ export default function Sidebar({ isCollapsed }) {
   };
 
   // Sort functionality toggle state with Firebase persistence
-  const [isSortEnabled, setIsSortEnabled] = useState(() => {
-    return userSettingsService.getSetting('sidebar-sort-enabled', false);
-  });
-
-  // Save sort state to Firebase
+  const [isSortEnabled, setIsSortEnabled] = useState(false);
+  
+  // Initialize sort state after service is ready
   useEffect(() => {
-    if (userSettingsService.currentUserId) {
-      userSettingsService.setSetting('sidebar-sort-enabled', isSortEnabled);
+    const initializeSortState = async () => {
+      try {
+        await userSettingsService.initialize();
+        const sortEnabled = userSettingsService.getSetting('sidebar-sort-enabled', false);
+        setIsSortEnabled(sortEnabled);
+      } catch (error) {
+        console.warn('Failed to load sort state from settings:', error);
+        setIsSortEnabled(false); // fallback to disabled
+      }
+    };
+    
+    initializeSortState();
+  }, []);
+
+  // Save sort state to Firebase when it changes (skip initial load)
+  useEffect(() => {
+    if (userSettingsService.currentUserId && userSettingsService.settings) {
+      // Only save if the service is initialized and this isn't the initial load
+      const currentSetting = userSettingsService.getSetting('sidebar-sort-enabled', false);
+      if (currentSetting !== isSortEnabled) {
+        userSettingsService.setSetting('sidebar-sort-enabled', isSortEnabled);
+      }
     }
   }, [isSortEnabled]);
 
