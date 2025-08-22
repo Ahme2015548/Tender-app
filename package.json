@@ -1,12 +1,12 @@
 {
   "name": "tender-app",
   "private": true,
-  "version": "1.0.7",
+  "version": "1.0.8",
   "scripts": {
-    "dev": "node ./node_modules/vite/bin/vite.js",
-    "build": "node build.cjs",
-    "build:vite": "node ./node_modules/vite/bin/vite.js build",
-    "preview": "node ./node_modules/vite/bin/vite.js preview",
+    "dev": "vite",
+    "build": "vite build",
+    "build:fallback": "node build.cjs",
+    "preview": "vite preview",
     "clean": "rimraf dist",
     "lint": "eslint ."
   },
