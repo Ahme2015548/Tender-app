@@ -12,6 +12,7 @@ export const ENTITY_PREFIXES = {
   LOCAL_PRODUCT: 'lp', 
   FOREIGN_PRODUCT: 'fp',
   MANUFACTURED_PRODUCT: 'mp',
+  SERVICE: 'svc',
   
   // Business Entities
   TENDER: 'tdr',

@@ -154,6 +154,33 @@ const ItemSelectionModal = ({
                   </label>
                 </div>
               </div>
+
+              {/* Service */}
+              <div className="col-6">
+                <div className="form-check p-0">
+                  <input
+                    className="form-check-input d-none"
+                    type="radio"
+                    name="itemType"
+                    id="service"
+                    value="service"
+                    checked={selectedItemType === 'service'}
+                    onChange={handleItemTypeChange}
+                  />
+                  <label 
+                    className={`form-check-label w-100 p-3 border rounded-3 text-center cursor-pointer transition-all ${
+                      selectedItemType === 'service' 
+                        ? 'border-primary text-primary' 
+                        : 'border-light hover-border-primary'
+                    }`}
+                    htmlFor="service"
+                    style={{ cursor: 'pointer', backgroundColor: selectedItemType === 'service' ? '#f8f9fa' : '#f5f5f5' }}
+                  >
+                    <i className="bi bi-wrench-adjustable-circle fs-1 d-block mb-2" style={{ color: '#6f42c1' }}></i>
+                    <span className="fw-medium">خدمة</span>
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -251,6 +251,9 @@ export class SimpleTrashService {
       } else if (originalCollection === 'employees') {
         const { EmployeeService } = await import('./employeeService');
         await EmployeeService.createEmployee(originalData);
+      } else if (originalCollection === 'services') {
+        const { ServiceService } = await import('./ServiceService');
+        await ServiceService.addService(originalData);
       } else if (originalCollection === 'rawmaterials') {
         const { RawMaterialService } = await import('./rawMaterialService');
         await RawMaterialService.createRawMaterial(originalData);
@@ -1125,6 +1128,16 @@ export class SimpleTrashService {
           jobTitle: item.jobTitle,
           status: item.status,
           autoCreated: item.autoCreated
+        };
+        break;
+        
+      case 'services':
+        displayName = item.name || 'خدمة غير محددة';
+        displayFields = {
+          type: item.type,
+          addDate: item.addDate,
+          description: item.description,
+          active: item.active
         };
         break;
         

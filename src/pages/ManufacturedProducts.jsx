@@ -941,6 +941,11 @@ function ManufacturedProductsContent() {
           console.log('Navigating to foreign products:', foreignProductsPath);
           navigate(foreignProductsPath);
           break;
+        case 'service':
+          const servicePath = `/manufactured-products/services/${id || 'new'}`;
+          console.log('Navigating to services:', servicePath);
+          navigate(servicePath);
+          break;
         default:
           console.log('Unknown item type:', itemType);
           showError('نوع البند غير معروف', 'خطأ');
@@ -1346,7 +1351,7 @@ function ManufacturedProductsContent() {
                 </li>
                 <li className="breadcrumb-item">
                   <a href="/manufactured-products" className="text-decoration-none text-primary">
-                    المنتجات المصنعة
+                    المنتج المصنعة
                   </a>
                 </li>
                 <li className="breadcrumb-item text-secondary" aria-current="page">

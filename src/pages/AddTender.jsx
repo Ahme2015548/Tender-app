@@ -978,6 +978,11 @@ function AddTenderContent() {
           console.log('Navigating to manufactured products:', manufacturedProductsPath);
           navigate(manufacturedProductsPath);
           break;
+        case 'service':
+          const servicePath = `/tenders/services/${id || 'new'}`;
+          console.log('Navigating to services:', servicePath);
+          navigate(servicePath);
+          break;
         default:
           console.log('Unknown item type:', itemType);
           showError('نوع البند غير معروف', 'خطأ');

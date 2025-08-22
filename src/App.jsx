@@ -22,6 +22,10 @@ import ManufacturedProducts from './pages/ManufacturedProducts';
 import ManufacturedRawMaterials from './pages/ManufacturedRawMaterials';
 import ManufacturedLocalProducts from './pages/ManufacturedLocalProducts';
 import ManufacturedForeignProducts from './pages/ManufacturedForeignProducts';
+import ServicesList from './pages/ServicesList';
+import AddService from './pages/AddService';
+import ServiceTender from './pages/ServiceTender';
+import ServiceManufacture from './pages/ServiceManufacture';
 import LocalSuppliers from './pages/LocalSuppliers';
 import ForeignSuppliers from './pages/ForeignSuppliers';
 import Clients from './pages/Clients';
@@ -49,6 +53,7 @@ const AppRoutes = () => {
           <Route path="/tenders/local-products/:tenderId" element={<LocalProductTender />} />
           <Route path="/tenders/foreign-products/:tenderId" element={<ForeignProductTender />} />
           <Route path="/tenders/manufactured-products/:tenderId" element={<ManufacturedProductTender />} />
+          <Route path="/tenders/services/:tenderId" element={<ServiceTender />} />
           <Route path="/raw-materials" element={<RawMaterials />} />
           <Route path="/raw-materials/add" element={<AddRawMaterial />} />
           <Route path="/raw-materials/edit/:id" element={<AddRawMaterial />} />
@@ -64,6 +69,10 @@ const AppRoutes = () => {
           <Route path="/manufactured-products/raw-materials/:productId" element={<ManufacturedRawMaterials />} />
           <Route path="/manufactured-products/local-products/:productId" element={<ManufacturedLocalProducts />} />
           <Route path="/manufactured-products/foreign-products/:productId" element={<ManufacturedForeignProducts />} />
+          <Route path="/manufactured-products/services/:productId" element={<ServiceManufacture />} />
+          <Route path="/services" element={<ServicesList />} />
+          <Route path="/services/add" element={<AddService />} />
+          <Route path="/services/edit/:id" element={<AddService />} />
           <Route path="/suppliers/local" element={<LocalSuppliers />} />
           <Route path="/suppliers/foreign" element={<ForeignSuppliers />} />
           <Route path="/clients" element={<Clients />} />
