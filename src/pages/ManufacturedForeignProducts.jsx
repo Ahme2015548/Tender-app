@@ -7,6 +7,7 @@ import SimpleActivityTimeline from '../components/SimpleActivityTimeline';
 import ManualActivityCreator from '../components/ManualActivityCreator';
 import { ForeignProductService } from '../services/foreignProductService';
 import { TenderItemsServiceNew } from '../services/TenderItemsServiceNew';
+import { ManufacturedProductService } from '../services/ManufacturedProductService';
 import { useActivity } from '../components/ActivityManager';
 import { ActivityProvider, AutoActivityTracker } from '../components/ActivityManager';
 import ModernSpinner from '../components/ModernSpinner';
@@ -26,6 +27,7 @@ function ManufacturedForeignProductsContent() {
   const [filteredForeignProducts, setFilteredForeignProducts] = useState([]);
   const [showQuantityModal, setShowQuantityModal] = useState(false);
   const [modalItems, setModalItems] = useState([]);
+  const [duplicateWarning, setDuplicateWarning] = useState(null); // For inline modal warnings
 
   const navigate = useNavigate();
   const { productId } = useParams();
@@ -120,40 +122,42 @@ function ManufacturedForeignProductsContent() {
       return;
     }
 
-    // Check for duplicates in existing items
-    const existingItems = await FirestorePendingDataService.getPendingProductItems() || [];
+    // 🔧 CRITICAL FIX: Fetch existing items once and reuse to prevent race conditions
+    console.log('🔍 FOREIGN PRODUCTS: Fetching existing items for duplicate check...');
+    const existingPendingItems = await FirestorePendingDataService.getPendingProductItems() || [];
+    console.log('📦 FOREIGN PRODUCTS: Existing items found:', existingPendingItems.length);
+    
     let existingMaterialIds = [];
     
-    if (existingItems && Array.isArray(existingItems)) {
-      existingMaterialIds = existingItems.map(item => item.materialInternalId);
+    // 🔧 FIXED: FirestorePendingDataService returns objects directly, not JSON strings
+    if (existingPendingItems && Array.isArray(existingPendingItems)) {
+      existingMaterialIds = existingPendingItems.map(item => item.materialInternalId);
+      console.log('🆔 FOREIGN PRODUCTS: Existing material IDs:', existingMaterialIds);
     }
 
     // Filter out duplicates from selected products
     const duplicateItems = [];
     const uniqueSelectedProducts = selectedProducts.filter(product => {
-      const isDuplicate = existingMaterialIds.includes(product.internalId);
+      // Check ALL possible ID fields
+      const possibleIds = [
+        product.internalId,
+        product.id,
+        product.materialInternalId,
+        product.materialId
+      ].filter(Boolean);
+      
+      const isDuplicate = possibleIds.some(id => existingMaterialIds.includes(id));
       if (isDuplicate) {
         duplicateItems.push(product.name);
       }
       return !isDuplicate;
     });
 
-    // Show warning if duplicates found
-    if (duplicateItems.length > 0) {
-      const duplicateNames = duplicateItems.join('، ');
-      showError(`البنود التالية موجودة مسبقاً في القائمة: ${duplicateNames}`, 'بنود مكررة');
-      
-      // If all selected items are duplicates, return
-      if (uniqueSelectedProducts.length === 0) {
-        return;
-      }
-      
-      // Continue with unique items only
-      console.log(`Found ${duplicateItems.length} duplicate items, proceeding with ${uniqueSelectedProducts.length} unique items`);
-    }
+    // 📝 NOTE: Duplicate checking moved to handleConfirmQuantities for better UX
+    // Users can see what they selected in the modal before getting duplicate warnings
 
-    // Prepare items with default quantity and calculate prices (use unique items only)
-    const itemsWithQuantity = uniqueSelectedProducts.map(item => {
+    // Prepare items with default quantity and calculate prices (show ALL selected items in modal)
+    const itemsWithQuantity = selectedProducts.map(item => {
       // Get price from quotes or product price
       let displayPrice = item.price || 0;
       let displaySupplier = item.supplier;
@@ -178,6 +182,7 @@ function ManufacturedForeignProductsContent() {
     });
 
     setModalItems(itemsWithQuantity);
+    setDuplicateWarning(null); // Clear any previous warnings
     setShowQuantityModal(true);
   };
 
@@ -198,57 +203,200 @@ function ManufacturedForeignProductsContent() {
         return;
       }
 
-      // SENIOR REACT: Create tender items directly - proven method from ForeignProductTender fix
-      const productItems = [];
+      console.log('🛡️ STARTING DUPLICATE PREVENTION FOR FOREIGN PRODUCTS...');
+      
+      // 🛡️ ENHANCED DUPLICATE PREVENTION: Check existing items
+      let existingPendingItems = await FirestorePendingDataService.getPendingProductItems() || [];
+      
+      // 🔧 FIX: If we're in edit mode (productId exists), also get existing items from the manufactured product document
+      if (productId && productId !== 'new') {
+        try {
+          console.log('🎯 EDIT MODE: Loading existing manufactured product items for duplicate check, product ID:', productId);
+          const manufacturedProduct = await ManufacturedProductService.getManufacturedProductById(productId);
+          
+          if (manufacturedProduct && manufacturedProduct.items && Array.isArray(manufacturedProduct.items)) {
+            console.log('📦 EDIT MODE: Found existing manufactured product items:', manufacturedProduct.items.length);
+            // Merge existing manufactured product items with any pending items
+            existingPendingItems = [...existingPendingItems, ...manufacturedProduct.items];
+          }
+        } catch (error) {
+          console.error('❌ Error loading existing manufactured product items for duplicate check:', error);
+        }
+      }
+      
+      let existingMaterialIds = [];
+      
+      // 🔧 FIXED: FirestorePendingDataService returns objects directly, not JSON strings
+      if (existingPendingItems && Array.isArray(existingPendingItems)) {
+        existingMaterialIds = existingPendingItems.map(item => 
+          item.materialInternalId || item.internalId || item.id
+        ).filter(Boolean);
+      }
+      
+      console.log('🔍 Existing material IDs:', existingMaterialIds);
+      console.log('🔍 Modal items to check:', modalItems.map(item => ({
+        name: item.name,
+        internalId: item.internalId,
+        id: item.id
+      })));
+      
+      // 🚨 FIRST: Check for duplicates WITHOUT creating any arrays yet
+      const duplicateItems = [];
       
       for (const item of modalItems) {
+        // 🛡️ FIXED: Check ALL possible ID fields to ensure we catch duplicates
+        const possibleIds = [
+          item.internalId,
+          item.id,
+          item.materialInternalId,
+          item.materialId
+        ].filter(Boolean);
+        
+        const isDuplicate = possibleIds.some(id => existingMaterialIds.includes(id));
+        
+        console.log(`🔍 DUPLICATE CHECK: "${item.name}":`);
+        console.log(`  - Possible IDs: [${possibleIds.join(', ')}]`);
+        console.log(`  - Existing IDs: [${existingMaterialIds.join(', ')}]`);
+        console.log(`  - Is Duplicate: ${isDuplicate}`);
+        
+        if (isDuplicate) {
+          duplicateItems.push(item.name);
+          console.log(`🚨 DUPLICATE FOUND: "${item.name}" with IDs [${possibleIds.join(', ')}] matches existing items!`);
+        }
+      }
+      
+      console.log('🛡️ DUPLICATE PREVENTION RESULT:', {
+        totalItems: modalItems.length,
+        duplicatesFound: duplicateItems.length,
+        duplicateNames: duplicateItems
+      });
+      
+      // 🚨 FORCE STOP EXECUTION IF DUPLICATES FOUND
+      if (duplicateItems.length > 0) {
+        const duplicateNames = duplicateItems.join('، ');
+        console.log('🚨 DUPLICATE PREVENTION ACTIVATED: Blocking duplicates:', duplicateNames);
+        
+        // 🚨 DUAL WARNING SYSTEM: Both alert popup and inline modal warning
+        showError(
+          `⚠️ البنود التالية موجودة مسبقاً في قائمة المنتج المصنع:\n\n${duplicateNames}\n\n❌ لا يمكن إضافة نفس البند مرتين.\n\n✅ يرجى إلغاء تحديد البنود المكررة والمحاولة مرة أخرى.`,
+          '🛡️ تحذير: منع التكرار'
+        );
+        
+        // 🚨 INLINE MODAL WARNING: Set persistent warning in modal UI
+        setDuplicateWarning(`⚠️ البنود المكررة: ${duplicateNames}`);
+        
+        // ⚠️ KEEP MODAL OPEN: Don't close modal so user can see warning and fix selection
+        // setShowQuantityModal(false); // REMOVED - Keep modal open
+        // setModalItems([]); // REMOVED - Keep selected items visible
+        return; // STOP execution but keep modal open for user action
+      }
+      
+      console.log('✅ No duplicates found, proceeding with creation...');
+      
+      // 🎯 NOW SAFE: Create uniqueModalItems since no duplicates were found
+      const uniqueModalItems = modalItems;
+      
+      // 🔧 SIMPLIFIED: Create manufactured product items directly for FirestorePendingDataService
+      const productItems = [];
+      
+      for (const item of uniqueModalItems) {
         try {
-          console.log('🔧 SENIOR REACT: Creating tender item directly for:', item.name);
+          console.log('🔄 Creating manufactured product item directly:', item.name);
           
-          // Create tender item directly with all required fields - no complex service calls
-          const tenderItem = {
-            internalId: `ti_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          // Create manufactured product item directly with all required fields
+          const productItem = {
+            internalId: `ti_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Generate unique ID
             materialInternalId: item.internalId,
             materialType: 'foreignProduct',
             materialName: item.name,
             materialCategory: item.category || '',
             materialUnit: item.unit || 'قطعة',
             quantity: item.quantity || 1,
-            unitPrice: item.unitPrice || 0,
-            totalPrice: (item.quantity || 1) * (item.unitPrice || 0),
-            supplierInfo: item.displaySupplier || '',
-            tenderId: productId === 'new' ? 'new' : productId,
+            unitPrice: item.unitPrice || item.price || 0,
+            totalPrice: (item.quantity || 1) * (item.unitPrice || item.price || 0),
+            supplierInfo: item.displaySupplier || item.supplier || '',
+            productId: productId === 'new' ? 'new' : productId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
           
-          productItems.push(tenderItem);
+          productItems.push(productItem);
           
-          console.log('✅ SENIOR REACT: Created tender item directly:', {
-            id: tenderItem.internalId,
-            materialId: tenderItem.materialInternalId,
-            name: tenderItem.materialName,
-            quantity: tenderItem.quantity,
-            unitPrice: tenderItem.unitPrice,
-            totalPrice: tenderItem.totalPrice
+          console.log('✅ Created manufactured product item directly:', {
+            internalId: productItem.internalId,
+            materialName: productItem.materialName,
+            quantity: productItem.quantity,
+            unitPrice: productItem.unitPrice,
+            totalPrice: productItem.totalPrice
           });
           
         } catch (itemError) {
-          console.error('Error creating manufactured product item for product:', item.name, itemError);
-          showError(`فشل في إضافة المنتج: ${item.name}`, 'خطأ في البيانات');
+          console.error('❌ Error creating manufactured product item for product:', item.name, itemError);
+          showError(`فشل في إضافة المنتج "${item.name}": ${itemError.message || 'خطأ غير معروف'}`, 'خطأ في البيانات');
           return;
         }
       }
       
-      // SENIOR REACT: Simple storage merge - same pattern as RawMaterialTender
-      const existingItemsStorage = await FirestorePendingDataService.getPendingProductItems() || [];
-      const allItems = [...existingItemsStorage, ...productItems];
+      // 🔧 CRITICAL DEBUG: Get existing items and merge with new items (duplicates already filtered out)
+      console.log('🔍 MERGE PHASE: Fetching existing items for merge...');
+      const existingItems = await FirestorePendingDataService.getPendingProductItems() || [];
+      console.log('📦 MERGE PHASE: Existing items fetched:', {
+        count: existingItems.length,
+        items: existingItems.map(item => ({
+          id: item.materialInternalId,
+          name: item.materialName,
+          type: item.materialType
+        }))
+      });
       
-      console.log('📦 SENIOR REACT: Merging manufactured product items:', {
-        existingCount: existingItemsStorage.length,
-        newCount: productItems.length,
-        totalCount: allItems.length,
-        items: productItems.map(item => ({
+      let allItems = [...productItems]; // Start with new items
+      console.log('🆕 MERGE PHASE: Starting with new items:', productItems.length);
+      
+      if (existingItems.length > 0) {
+        try {
+          if (Array.isArray(existingItems)) {
+            console.log('🔄 MERGE PHASE: Refreshing pricing for existing items...');
+            // Refresh pricing for existing items before merging
+            const refreshedExistingItems = await TenderItemsServiceNew.refreshTenderItemsPricing(existingItems);
+            console.log('💰 MERGE PHASE: Price refresh completed:', {
+              originalCount: existingItems.length,
+              refreshedCount: refreshedExistingItems.length,
+              refreshedItems: refreshedExistingItems.map(item => ({
+                id: item.materialInternalId,
+                name: item.materialName,
+                price: item.unitPrice
+              }))
+            });
+            
+            // ✅ SAFE MERGE: Duplicates already prevented above, no need for additional filtering
+            console.log('🔄 MERGE PHASE: Performing safe merge...');
+            console.log('📋 Before merge - Existing items:', refreshedExistingItems.length);
+            console.log('📋 Before merge - New items:', productItems.length);
+            
+            allItems = [...refreshedExistingItems, ...productItems];
+            
+            console.log('✅ MERGE PHASE: Safe merge completed:', {
+              existingItemsCount: refreshedExistingItems.length,
+              newItemsCount: productItems.length,
+              finalItemsCount: allItems.length,
+              finalItems: allItems.map(item => ({
+                id: item.materialInternalId,
+                name: item.materialName,
+                type: item.materialType
+              }))
+            });
+          }
+        } catch (error) {
+          console.error('❌ MERGE PHASE: Error in merge operation:', error);
+        }
+      } else {
+        console.log('📭 MERGE PHASE: No existing items found, using only new items');
+      }
+      
+      console.log('Storing ID-based manufactured product items:', {
+        totalItems: allItems.length,
+        newItems: productItems.length,
+        items: allItems.map(item => ({
           id: item.internalId,
           materialId: item.materialInternalId,
           name: item.materialName,
@@ -257,20 +405,25 @@ function ManufacturedForeignProductsContent() {
         }))
       });
       
-      // Use setPendingProductItems with merged items - same pattern as tender
       await FirestorePendingDataService.setPendingProductItems(allItems);
+      console.log('✅ STORAGE COMPLETE - Stored items to FirestorePendingDataService:', allItems.length);
+      
+      // 🔍 DEEP DEBUG: Verify storage immediately after saving
+      setTimeout(async () => {
+        const verifyItems = await FirestorePendingDataService.getPendingProductItems();
+        console.log('🔍 VERIFICATION: Items in storage after save:', {
+          count: verifyItems?.length || 0,
+          items: verifyItems
+        });
+      }, 100);
 
-      // SENIOR REACT: Dispatch custom event to notify Manufacturing Products page
-      console.log('🚀 SENIOR REACT: Dispatching product items added event');
+      // Dispatch custom event to notify AddManufacturedProduct page
+      console.log('📡 DISPATCHING CUSTOM EVENT: productItemsAdded');
       window.dispatchEvent(new CustomEvent('productItemsAdded', {
-        detail: {
-          source: 'ManufacturedForeignProducts',
-          itemsCount: productItems.length,
-          items: productItems.map(item => ({
-            id: item.internalId,
-            name: item.materialName,
-            type: item.materialType
-          }))
+        detail: { 
+          count: productItems.length, 
+          type: 'foreignProduct',
+          items: allItems
         }
       }));
 
@@ -278,27 +431,31 @@ function ManufacturedForeignProductsContent() {
       try {
         const currentUser = getCurrentUser();
         if (currentUser && currentUser.name) {
-          logActivity('task', `${currentUser.name} أضاف منتجات أجنبية للمنتج المصنع`, `تم إضافة ${productItems.length} منتج أجنبي`);
+          logActivity('task', `${currentUser.name} أضاف منتجات أجنبية للمنتج المصنع`, `تم إضافة ${productItems.length} منتج أجنبي بنظام الهوية الفريدة`);
         }
       } catch (logError) {
         console.error('Failed to log activity:', logError);
       }
       
       // Show success message
-      showSuccess(`تم إضافة ${productItems.length} منتج مستورد للمنتج المصنع بنجاح`, 'تمت الإضافة');
+      showSuccess(
+        `تم إضافة ${productItems.length} منتج أجنبي بنجاح إلى قائمة المنتج المصنع`,
+        'نجحت العملية'
+      );
       
-      // Close modal and navigate back to ManufacturedProducts
+      // Close modal and navigate back to AddManufacturedProduct
       setShowQuantityModal(false);
       setModalItems([]);
+      setDuplicateWarning(null); // Clear warning on success
       
-      // Navigate back to ManufacturedProducts page with a slight delay
+      // Navigate back to AddManufacturedProduct page with delay to show success message
       setTimeout(() => {
         if (productId === 'new') {
           navigate('/manufactured-products/add');
         } else {
           navigate(`/manufactured-products/edit/${productId}`);
         }
-      }, 100);
+      }, 2000); // 2 seconds to show success message
       
     } catch (error) {
       console.error('Error in handleConfirmQuantities:', error);
@@ -309,6 +466,7 @@ function ManufacturedForeignProductsContent() {
   const handleCloseQuantityModal = () => {
     setShowQuantityModal(false);
     setModalItems([]);
+    setDuplicateWarning(null); // Clear warning on modal close
   };
 
   const getTotalModalPrice = () => {
@@ -395,7 +553,7 @@ function ManufacturedForeignProductsContent() {
                     <div className="row align-items-center justify-content-between">
                       <div className="col-lg-4">
                         <h5 className="mb-0 fw-bold">
-                          <i className="bi bi-globe text-info me-2"></i>
+                          <i className="bi bi-globe text-warning me-2"></i>
                           قائمة المنتجات الأجنبية ({filteredForeignProducts.length})
                         </h5>
                       </div>
@@ -424,7 +582,7 @@ function ManufacturedForeignProductsContent() {
                             </span>
                           </div>
                           <button 
-                            className="btn btn-info shadow-sm px-4" 
+                            className="btn btn-success shadow-sm px-4" 
                             onClick={handleAddSelectedProducts}
                             disabled={selectedProducts.length === 0}
                             style={{
@@ -604,6 +762,26 @@ function ManufacturedForeignProductsContent() {
               </div>
               
               <div className="modal-body p-0" style={{ maxHeight: '50vh', overflowY: 'auto' }}>
+                {/* 🚨 PERSISTENT DUPLICATE WARNING */}
+                {duplicateWarning && (
+                  <div className="alert alert-warning alert-dismissible m-3 mb-2" role="alert" style={{
+                    background: 'linear-gradient(45deg, #fff3cd, #ffeaa7)',
+                    border: '2px solid #f39c12',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 12px rgba(243, 156, 18, 0.3)'
+                  }}>
+                    <div className="d-flex align-items-center">
+                      <i className="bi bi-exclamation-triangle-fill text-warning me-2" style={{ fontSize: '20px' }}></i>
+                      <div className="flex-grow-1">
+                        <strong>تحذير: بنود مكررة!</strong>
+                        <div className="mt-1 text-dark">{duplicateWarning}</div>
+                        <small className="text-muted">يرجى إلغاء تحديد البنود المكررة قبل المتابعة</small>
+                      </div>
+                    </div>
+                    <button type="button" className="btn-close" aria-label="Close" onClick={() => setDuplicateWarning(null)}></button>
+                  </div>
+                )}
+                
                 <div className="table-responsive">
                   <table className="table table-hover mb-0">
                     <thead className="table-light">
@@ -620,7 +798,7 @@ function ManufacturedForeignProductsContent() {
                         <tr key={item.id} style={{ height: '60px' }}>
                           <td className="text-center">
                             <div className="d-flex align-items-center justify-content-center">
-                              <i className="bi bi-globe text-info me-2"></i>
+                              <i className="bi bi-globe text-warning me-2"></i>
                               <div>
                                 <button
                                   className="btn btn-link p-0 fw-bold text-primary"
@@ -739,7 +917,10 @@ function ManufacturedForeignProductsContent() {
                     <button 
                       type="button" 
                       className="btn btn-primary"
-                      onClick={handleConfirmQuantities}
+                      onClick={() => {
+                        console.log('🔥 CONFIRM BUTTON CLICKED! Modal items:', modalItems);
+                        handleConfirmQuantities();
+                      }}
                       style={{ 
                         height: '32px', 
                         width: '80px', 

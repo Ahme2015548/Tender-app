@@ -296,8 +296,7 @@ function AddTenderContent() {
             console.log('🔄 NEW TENDER: Found pending items, adding to form');
             
             // 🎯 CRITICAL FIX: Only show success message if items are newly added (not reloaded)
-            const successMessageKey = 'tender_success_shown_new';
-            const isAlreadyShown = localStorage.getItem(successMessageKey) === 'true';
+            const isAlreadyShown = await FirestorePendingDataService.getPendingData('tender_success_shown_new') === 'true';
             const shouldShowMessage = tenderItems.length === 0 && !hasShownSuccessMessage && !isAlreadyShown;
             
             setTenderItems(pendingItems);
@@ -319,7 +318,7 @@ function AddTenderContent() {
             // Only show success message for genuinely new items (not reloads)
             if (shouldShowMessage) {
               setHasShownSuccessMessage(true);
-              localStorage.setItem(successMessageKey, 'true');
+              await FirestorePendingDataService.setPendingData('tender_success_shown_new', 'true');
               showConfirm(
                 `تم إضافة ${pendingItems.length} عنصر للمناقصة بنجاح.\n\nيمكنك الآن مراجعة البنود ومتابعة ملء بيانات المناقصة.`,
                 () => {}, // Empty callback - just close the dialog
@@ -906,7 +905,7 @@ function AddTenderContent() {
         await FirestorePendingDataService.clearPendingTenderItems();
         
         // Clear success message flag for next tender
-        localStorage.removeItem('tender_success_shown_new');
+        await FirestorePendingDataService.clearPendingData('tender_success_shown_new');
         
         showSuccess('تم إضافة المناقصة بنجاح', 'تمت الإضافة');
       }
@@ -933,7 +932,7 @@ function AddTenderContent() {
         await FirestorePendingDataService.clearPendingTenderItems();
         
         // Clear success message flag for next tender
-        localStorage.removeItem('tender_success_shown_new');
+        await FirestorePendingDataService.clearPendingData('tender_success_shown_new');
         
         console.log('✅ CANCEL: All pending data cleared successfully');
       }
@@ -1706,22 +1705,24 @@ function AddTenderContent() {
                                                         
                                                         // Get the Firebase document ID by searching with internal ID
                                                         if (materialType === 'rawMaterial') {
-                                                          console.log('Loading raw materials...');
+                                                          console.log('Loading raw material...');
                                                           const { RawMaterialService } = await import('../services/rawMaterialService');
-                                                          allItems = await RawMaterialService.getAllRawMaterials();
-                                                          console.log('Total raw materials loaded:', allItems.length);
-                                                          console.log('Sample raw material IDs:', allItems.slice(0, 3).map(m => ({ id: m.id, internalId: m.internalId, name: m.name })));
-                                                          
-                                                          // Try multiple matching strategies
-                                                          let material = allItems.find(m => m.internalId === materialInternalId);
+                                                          // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all materials
+                                                          let material = await RawMaterialService.getRawMaterialByInternalId(materialInternalId);
                                                           
                                                           if (!material) {
-                                                            // Try matching by Firebase document ID
-                                                            material = allItems.find(m => m.id === materialInternalId);
+                                                            // Try matching by Firebase document ID as fallback
+                                                            try {
+                                                              material = await RawMaterialService.getRawMaterialById(materialInternalId);
+                                                            } catch (error) {
+                                                              console.log('Could not find material by Firebase ID, trying name fallback...');
+                                                            }
                                                           }
                                                           
                                                           if (!material) {
-                                                            // Try matching by name (as fallback)
+                                                            // Last resort: try matching by name (requires full scan)
+                                                            console.log('Using name fallback - loading all raw materials...');
+                                                            const allItems = await RawMaterialService.getAllRawMaterials();
                                                             const displayName = item.materialName || item.name;
                                                             material = allItems.find(m => m.name === displayName);
                                                           }
@@ -1733,22 +1734,24 @@ function AddTenderContent() {
                                                             navigate(`/raw-materials/edit/${firebaseId}`);
                                                           }
                                                         } else if (materialType === 'localProduct') {
-                                                          console.log('Loading local products...');
+                                                          console.log('Loading local product...');
                                                           const { LocalProductService } = await import('../services/localProductService');
-                                                          allItems = await LocalProductService.getAllLocalProducts();
-                                                          console.log('Total local products loaded:', allItems.length);
-                                                          console.log('Sample local product IDs:', allItems.slice(0, 3).map(p => ({ id: p.id, internalId: p.internalId, name: p.name })));
-                                                          
-                                                          // Try multiple matching strategies
-                                                          let product = allItems.find(p => p.internalId === materialInternalId);
+                                                          // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all products
+                                                          let product = await LocalProductService.getLocalProductByInternalId(materialInternalId);
                                                           
                                                           if (!product) {
-                                                            // Try matching by Firebase document ID
-                                                            product = allItems.find(p => p.id === materialInternalId);
+                                                            // Try matching by Firebase document ID as fallback
+                                                            try {
+                                                              product = await LocalProductService.getLocalProductById(materialInternalId);
+                                                            } catch (error) {
+                                                              console.log('Could not find product by Firebase ID, trying name fallback...');
+                                                            }
                                                           }
                                                           
                                                           if (!product) {
-                                                            // Try matching by name (as fallback)
+                                                            // Last resort: try matching by name (requires full scan)
+                                                            console.log('Using name fallback - loading all local products...');
+                                                            const allItems = await LocalProductService.getAllLocalProducts();
                                                             const displayName = item.materialName || item.name;
                                                             product = allItems.find(p => p.name === displayName);
                                                           }
@@ -1760,22 +1763,24 @@ function AddTenderContent() {
                                                             navigate(`/local-products/edit/${firebaseId}`);
                                                           }
                                                         } else if (materialType === 'foreignProduct') {
-                                                          console.log('Loading foreign products...');
+                                                          console.log('Loading foreign product...');
                                                           const { ForeignProductService } = await import('../services/foreignProductService');
-                                                          allItems = await ForeignProductService.getAllForeignProducts();
-                                                          console.log('Total foreign products loaded:', allItems.length);
-                                                          console.log('Sample foreign product IDs:', allItems.slice(0, 3).map(p => ({ id: p.id, internalId: p.internalId, name: p.name })));
-                                                          
-                                                          // Try multiple matching strategies
-                                                          let product = allItems.find(p => p.internalId === materialInternalId);
+                                                          // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all products
+                                                          let product = await ForeignProductService.getForeignProductByInternalId(materialInternalId);
                                                           
                                                           if (!product) {
-                                                            // Try matching by Firebase document ID
-                                                            product = allItems.find(p => p.id === materialInternalId);
+                                                            // Try matching by Firebase document ID as fallback
+                                                            try {
+                                                              product = await ForeignProductService.getForeignProductById(materialInternalId);
+                                                            } catch (error) {
+                                                              console.log('Could not find product by Firebase ID, trying name fallback...');
+                                                            }
                                                           }
                                                           
                                                           if (!product) {
-                                                            // Try matching by name (as fallback)
+                                                            // Last resort: try matching by name (requires full scan)
+                                                            console.log('Using name fallback - loading all foreign products...');
+                                                            const allItems = await ForeignProductService.getAllForeignProducts();
                                                             const displayName = item.materialName || item.name;
                                                             product = allItems.find(p => p.name === displayName);
                                                           }

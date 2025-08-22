@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase.js';
 import { generateId } from '../utils/idGenerator.js';
+import { FirestorePendingDataService } from './FirestorePendingDataService.js';
 
 export class SimpleTenderItemsService {
   
@@ -42,13 +43,13 @@ export class SimpleTenderItemsService {
           return items;
           
         } catch (firebaseError) {
-          console.error('❌ Firebase failed, using sessionDataService:', firebaseError);
+          console.error('❌ Firebase failed, using FirestorePendingDataService:', firebaseError);
         }
       }
       
-      // Fallback to sessionDataService
-      const items = await sessionDataService.getSessionData(`tenderItems_${tenderId || 'new'}`) || [];
-      console.log('📦 sessionDataService: Got tender items:', items.length);
+      // Fallback to FirestorePendingDataService
+      const items = await FirestorePendingDataService.getPendingData(`tenderItems_${tenderId || 'new'}`) || [];
+      console.log('📦 FirestorePendingDataService: Got tender items:', items.length);
       return Array.isArray(items) ? items : [];
       
     } catch (error) {
@@ -58,7 +59,7 @@ export class SimpleTenderItemsService {
   }
   
   /**
-   * Add material to tender (Firebase with sessionDataService backup)
+   * Add material to tender (Firebase with FirestorePendingDataService backup)
    */
   static async addMaterialToTender(tenderId, materialData) {
     try {
@@ -90,16 +91,16 @@ export class SimpleTenderItemsService {
           return { id: docRef.id, ...tenderItem };
           
         } catch (firebaseError) {
-          console.error('❌ Firebase add failed, using sessionDataService:', firebaseError);
+          console.error('❌ Firebase add failed, using FirestorePendingDataService:', firebaseError);
         }
       }
       
-      // Add to sessionDataService
+      // Add to FirestorePendingDataService
       const currentItems = await this.getTenderItems(tenderId);
       const updatedItems = [...currentItems, tenderItem];
-      await sessionDataService.setSessionData(`tenderItems_${tenderId || 'new'}`, updatedItems);
+      await FirestorePendingDataService.setPendingData(`tenderItems_${tenderId || 'new'}`, updatedItems);
       
-      console.log('📦 sessionDataService: Added tender item');
+      console.log('📦 FirestorePendingDataService: Added tender item');
       return tenderItem;
       
     } catch (error) {
@@ -109,7 +110,7 @@ export class SimpleTenderItemsService {
   }
   
   /**
-   * Delete tender item (Firebase with sessionDataService backup)
+   * Delete tender item (Firebase with FirestorePendingDataService backup)
    */
   static async deleteTenderItem(itemId, tenderId) {
     try {
@@ -126,14 +127,14 @@ export class SimpleTenderItemsService {
         }
       }
       
-      // Remove from sessionDataService
+      // Remove from FirestorePendingDataService
       const currentItems = await this.getTenderItems(tenderId);
       const updatedItems = currentItems.filter(item => 
         item.id !== itemId && item.internalId !== itemId
       );
-      await sessionDataService.setSessionData(`tenderItems_${tenderId || 'new'}`, updatedItems);
+      await FirestorePendingDataService.setPendingData(`tenderItems_${tenderId || 'new'}`, updatedItems);
       
-      console.log('📦 sessionDataService: Deleted tender item');
+      console.log('📦 FirestorePendingDataService: Deleted tender item');
       return true;
       
     } catch (error) {

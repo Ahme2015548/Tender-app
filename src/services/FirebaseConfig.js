@@ -181,11 +181,7 @@ export const initializeAuthStateMonitoring = () => {
     } else {
       console.log('👋 User signed out, clearing caches...');
       // Clear all caches when user signs out
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('firestore_cache_')) {
-          localStorage.removeItem(key);
-        }
-      });
+      // All localStorage eliminated
     }
   });
 };

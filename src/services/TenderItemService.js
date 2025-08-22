@@ -7,6 +7,7 @@ import { generateId, ENTITY_PREFIXES } from '../utils/idGenerator';
 import { RawMaterialService } from './rawMaterialService';
 import { LocalProductService } from './localProductService';
 import { ForeignProductService } from './foreignProductService';
+import { FirestorePendingDataService } from './FirestorePendingDataService';
 
 export class TenderItemService {
   
@@ -420,12 +421,12 @@ export class TenderItemService {
   }
 
   /**
-   * Helper method to get tender items from storage (sessionDataService)
+   * Helper method to get tender items from storage (FirestorePendingDataService)
    */
   static async getAllTenderItemsFromStorage() {
     try {
-      // Check sessionDataService for pending items
-      const pendingItems = await sessionDataService.getPendingTenderItems();
+      // Check FirestorePendingDataService for pending items
+      const pendingItems = await FirestorePendingDataService.getPendingTenderItems();
       if (pendingItems && pendingItems.length > 0) {
         return pendingItems;
       }
@@ -522,21 +523,14 @@ export class TenderItemService {
    */
   static async findLocalProduct(productInternalId, productName) {
     try {
-      // Get all local products
-      const allProducts = await LocalProductService.getAllLocalProducts();
+      // 🚀 PERFORMANCE FIX: Use direct targeted lookup instead of scanning all products
+      let sourceProduct = await LocalProductService.getLocalProductByInternalId(productInternalId);
       
-      // Primary lookup by internal ID
-      let sourceProduct = allProducts.find(product => 
-        product.internalId === productInternalId
-      );
-      
-      // Fallback lookup methods
-      if (!sourceProduct) {
-        console.log('Local product not found by internal ID, trying alternative lookup...');
-        
-        sourceProduct = allProducts.find(product => 
-          product.id === productInternalId ||
-          product.name === productName
+      // Only fallback to full scan if absolutely necessary
+      if (!sourceProduct && productName) {
+        console.log('Local product not found by internal ID, trying name fallback...');
+        const allProducts = await LocalProductService.getAllLocalProducts();
+        sourceProduct = allProducts.find(product => product.name === productName
         );
         
         if (sourceProduct) {
@@ -564,34 +558,26 @@ export class TenderItemService {
         searchByName: productName
       });
       
-      // Get all foreign products
-      const allProducts = await ForeignProductService.getAllForeignProducts();
-      console.log('📦 Total foreign products found:', allProducts.length);
+      // 🚀 PERFORMANCE FIX: Use direct targeted lookup instead of scanning all products
+      let sourceProduct = await ForeignProductService.getForeignProductByInternalId(productInternalId);
       
-      // Log all available foreign products for debugging
-      console.log('📋 Available foreign products:', allProducts.map(p => ({
-        id: p.id,
-        internalId: p.internalId,
-        name: p.name,
-        price: p.price
-      })));
+      // Only fallback to full scan if absolutely necessary
+      if (!sourceProduct && productName) {
+        console.log('Foreign product not found by internal ID, trying name fallback...');
+        const allProducts = await ForeignProductService.getAllForeignProducts();
+        console.log('📦 Total foreign products found:', allProducts.length);
       
-      // Primary lookup by internal ID
-      let sourceProduct = allProducts.find(product => 
-        product.internalId === productInternalId
-      );
-      
-      if (sourceProduct) {
-        console.log('✅ Found foreign product by internal ID:', sourceProduct.name);
-      }
-      
-      // Fallback lookup methods
-      if (!sourceProduct) {
-        console.log('❌ Foreign product not found by internal ID, trying alternative lookup...');
+        // Log all available foreign products for debugging
+        console.log('📋 Available foreign products:', allProducts.map(p => ({
+          id: p.id,
+          internalId: p.internalId,
+          name: p.name,
+          price: p.price
+        })));
         
         sourceProduct = allProducts.find(product => 
-          product.id === productInternalId ||
-          product.name === productName
+          product.name === productName ||
+          product.id === productInternalId
         );
         
         if (sourceProduct) {

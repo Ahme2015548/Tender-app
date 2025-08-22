@@ -552,48 +552,6 @@ export class TenderItemsServiceNew {
     }
   }
 
-  // Migrate localStorage items to Firebase
-  static async migrateLocalStorageItems(tenderId, localStorageItems) {
-    try {
-      console.log('🔄 Migrating localStorage items to Firebase:', localStorageItems.length);
-      
-      if (!Array.isArray(localStorageItems) || localStorageItems.length === 0) {
-        return [];
-      }
-      
-      const addedItems = [];
-      
-      for (const localItem of localStorageItems) {
-        try {
-          // Check if item already exists
-          const exists = await this.materialExistsInTender(
-            tenderId,
-            localItem.materialInternalId,
-            localItem.materialType || 'rawMaterial'
-          );
-          
-          if (!exists) {
-            const newItem = await this.addMaterialToTender(
-              tenderId,
-              localItem.materialInternalId,
-              localItem.materialType || 'rawMaterial',
-              localItem.quantity || 1
-            );
-            addedItems.push(newItem);
-          }
-        } catch (itemError) {
-          console.error('⚠️ Failed to migrate item:', localItem.materialName, itemError);
-        }
-      }
-      
-      console.log('✅ Migration completed:', addedItems.length, 'items migrated');
-      return addedItems;
-      
-    } catch (error) {
-      console.error('❌ Error migrating localStorage items:', error);
-      throw new Error('فشل في ترحيل البيانات');
-    }
-  }
 
   // Search tender items
   static async searchTenderItems(tenderId, searchTerm) {

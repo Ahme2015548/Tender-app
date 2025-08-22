@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { getImage } from '../utils/ImageManager';
+import { userSettingsService } from '../services/UserSettingsService';
 import './Sidebar.scss';
 
 export default function Sidebar({ isCollapsed }) {
@@ -25,6 +26,9 @@ export default function Sidebar({ isCollapsed }) {
       setIsTenderItemsDetailsOpen(true); // Auto-expand the treeview
     } else if (path === '/foreign-products') {
       setActiveItem('imported-product');
+      setIsTenderItemsDetailsOpen(true); // Auto-expand the treeview
+    } else if (path === '/manufactured-products') {
+      setActiveItem('manufactured-product');
       setIsTenderItemsDetailsOpen(true); // Auto-expand the treeview
     } else if (path === '/suppliers/local') {
       setActiveItem('local-suppliers');
@@ -96,20 +100,8 @@ export default function Sidebar({ isCollapsed }) {
     { id: 'employees', type: 'sub', component: 'employees' }
   ];
 
-  // Load saved order from localStorage or use defaults
+  // Use default order (localStorage eliminated)
   const loadSavedOrder = (key, defaultItems) => {
-    try {
-      const saved = localStorage.getItem(key);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        // Validate that saved data has the same structure
-        if (Array.isArray(parsed) && parsed.length === defaultItems.length) {
-          return parsed;
-        }
-      }
-    } catch (error) {
-      console.error('Error loading saved order:', error);
-    }
     return defaultItems;
   };
 
@@ -134,26 +126,7 @@ export default function Sidebar({ isCollapsed }) {
     loadSavedOrder('sidebar-hr-sub-items', defaultHRSubItems)
   );
 
-  // Save order to localStorage whenever items change
-  useEffect(() => {
-    localStorage.setItem('sidebar-menu-items', JSON.stringify(menuItems));
-  }, [menuItems]);
-
-  useEffect(() => {
-    localStorage.setItem('sidebar-tender-sub-items', JSON.stringify(tenderSubItems));
-  }, [tenderSubItems]);
-
-  useEffect(() => {
-    localStorage.setItem('sidebar-tender-detail-sub-items', JSON.stringify(tenderDetailSubItems));
-  }, [tenderDetailSubItems]);
-
-  useEffect(() => {
-    localStorage.setItem('sidebar-supplier-sub-items', JSON.stringify(supplierSubItems));
-  }, [supplierSubItems]);
-
-  useEffect(() => {
-    localStorage.setItem('sidebar-hr-sub-items', JSON.stringify(hrSubItems));
-  }, [hrSubItems]);
+  // localStorage eliminated - no persistence needed
 
   // Reset function to restore default order (optional)
   const resetSidebarOrder = () => {
@@ -162,27 +135,17 @@ export default function Sidebar({ isCollapsed }) {
     setTenderDetailSubItems(defaultTenderDetailSubItems);
     setSupplierSubItems(defaultSupplierSubItems);
     setHRSubItems(defaultHRSubItems);
-    localStorage.removeItem('sidebar-menu-items');
-    localStorage.removeItem('sidebar-tender-sub-items');
-    localStorage.removeItem('sidebar-tender-detail-sub-items');
-    localStorage.removeItem('sidebar-supplier-sub-items');
-    localStorage.removeItem('sidebar-hr-sub-items');
+    // localStorage eliminated('sidebar-menu-items');
+    // localStorage eliminated('sidebar-tender-sub-items');
+    // localStorage eliminated('sidebar-tender-detail-sub-items');
+    // localStorage eliminated('sidebar-supplier-sub-items');
+    // localStorage eliminated('sidebar-hr-sub-items');
   };
 
-  // Sort functionality toggle state
-  const [isSortEnabled, setIsSortEnabled] = useState(() => {
-    try {
-      const saved = localStorage.getItem('sidebar-sort-enabled');
-      return saved !== null ? JSON.parse(saved) : false; // Default to false (disabled)
-    } catch (error) {
-      return false;
-    }
-  });
+  // Sort functionality toggle state (localStorage eliminated)
+  const [isSortEnabled, setIsSortEnabled] = useState(false);
 
-  // Save sort enabled state to localStorage
-  useEffect(() => {
-    localStorage.setItem('sidebar-sort-enabled', JSON.stringify(isSortEnabled));
-  }, [isSortEnabled]);
+  // localStorage eliminated - no persistence needed
 
   // Toggle sort functionality
   const toggleSortFunctionality = () => {
@@ -719,7 +682,7 @@ export default function Sidebar({ isCollapsed }) {
       'raw-materials': { to: '/raw-materials', icon: 'bi-gear', text: 'مواد خام' },
       'local-product': { to: '/local-products', icon: 'bi-house', text: 'منتج محلي' },
       'imported-product': { to: '/foreign-products', icon: 'bi-globe', text: 'منتج مستورد' },
-      'manufactured-product': { icon: 'bi-tools', text: 'منتج مصنع' }
+      'manufactured-product': { to: '/manufactured-products', icon: 'bi-tools', text: 'منتج مصنع' }
     };
 
     const config = subItemConfig[subItem.id];
@@ -740,8 +703,8 @@ export default function Sidebar({ isCollapsed }) {
       handleDrop(e, subItem, 'tender-detail-sub');
     };
 
-    // raw-materials, local-product, and imported-product have links, others are just clickable elements
-    const hasLink = subItem.id === 'raw-materials' || subItem.id === 'local-product' || subItem.id === 'imported-product';
+    // raw-materials, local-product, imported-product, and manufactured-product have links
+    const hasLink = subItem.id === 'raw-materials' || subItem.id === 'local-product' || subItem.id === 'imported-product' || subItem.id === 'manufactured-product';
 
     return (
       <li 

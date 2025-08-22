@@ -132,11 +132,7 @@ export const AuthProviderNew = ({ children }) => {
       setMigrationStatus({ completed: false, running: false, error: null });
       
       // Clear Firestore cache entries on logout (not app data)
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('firestore_cache_')) {
-          localStorage.removeItem(key);
-        }
-      });
+      // All localStorage eliminated
       
       console.log('✅ Sign out successful and caches cleared');
     } catch (error) {

@@ -1,14 +1,4 @@
-/*
-✅ Acceptance Checklist:
-- Styles/classes match AddTender 1:1 (pixel-perfect copy)
-- All buttons/modals match tender behavior exactly
-- Loading, error, and success toasts match tender timing and text style
-- Firestore writes: manufacturedProducts collection with serverTimestamp and internalId
-- Activity logging/Timeline matches AddTender pattern
-- No breaking changes to other pages, imports, or shared providers
-*/
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
@@ -24,19 +14,15 @@ import CustomAlert from '../components/CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import ItemSelectionModal from '../components/ItemSelectionModal';
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
-import { TenderItemsServiceNew } from '../services/TenderItemsServiceNew';
 import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
-import { FirestoreDocumentService } from '../services/FirestoreDocumentService';
-import { RawMaterialService } from '../services/rawMaterialService';
-import { ForeignProductService } from '../services/foreignProductService';
-import { LocalProductService } from '../services/localProductService';
 import { formatDateForInput } from '../utils/dateUtils';
 import { useDateFormat } from '../hooks/useDateFormat';
 import fileStorageService from '../services/fileStorageService';
 import { SimpleTrashService } from '../services/simpleTrashService';
 import TenderDocumentModal from '../components/TenderDocumentModal';
-import { auth } from '../services/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
+import { RawMaterialService } from '../services/rawMaterialService';
+import { ForeignProductService } from '../services/foreignProductService';
+import { LocalProductService } from '../services/localProductService';
 
 function ManufacturedProductsContent() {
   const navigate = useNavigate();
@@ -49,22 +35,12 @@ function ManufacturedProductsContent() {
   const isEditing = !!id;
   
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [authReady, setAuthReady] = useState(false);
-  
-  
-  // Price refresh visual feedback system removed
-  const [formData, setFormData] = useState(() => {
-    // Initialize form data - will load from Firebase on mount
-    console.log('📋 Initializing form data, will load from Firebase...');
-    
-    // Default form structure - EXACT SAME as AddTender
-    return {
-      title: '',
-      referenceNumber: '',
-      description: '',
-      submissionDeadline: '',
-      estimatedValue: ''
-    };
+  const [formData, setFormData] = useState({
+    title: '',
+    referenceNumber: '',
+    description: '',
+    submissionDeadline: '',
+    estimatedValue: ''
   });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -78,394 +54,279 @@ function ManufacturedProductsContent() {
   const [pendingFileData, setPendingFileData] = useState(null);
   const [customFileName, setCustomFileName] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [productItems, setProductItems] = useState([]);
+  
+  // ✅ ID-based duplicate prevention tracking
+  const [selectedItemIds, setSelectedItemIds] = useState([]);
+
+  // 🧠 SENIOR REACT: Edit modal state management for product items
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
-  const [editingItemIndex, setEditingItemIndex] = useState(-1);
-  const [productItems, setProductItems] = useState([]);
+  const [editingIndex, setEditingIndex] = useState(null);
+  
+  // 🔒 Simple processing lock
+  const [isProcessingPendingItems, setIsProcessingPendingItems] = useState(false);
+  const [hasShownSuccessMessage, setHasShownSuccessMessage] = useState(false);
 
-  const handleToggle = () => {
-    setSidebarCollapsed(!sidebarCollapsed);
-  };
-
-  // 🧠 SENIOR REACT: Simple direct price refresh system
-  const [refreshing, setRefreshing] = useState(false);
-
-  const refreshAll = async () => {
-    if (productItems.length === 0) {
-      showError('لا توجد بنود للتحديث', 'قائمة فارغة');
-      return;
-    }
-
-    setRefreshing(true);
-    try {
-      // FORCE DEBUG: Show exactly what we're working with
-      console.log('🔄 PRODUCTITEMS RAW DATA:', JSON.stringify(productItems, null, 2));
-      console.log('🔄 Starting direct price refresh for', productItems.length, 'items');
-      
-      let updatedCount = 0;
-      const updatedItems = [];
-
-      for (const item of productItems) {
-        console.log('🔍 Refreshing item:', {
-          name: item.materialName,
-          type: item.materialType,
-          id: item.materialInternalId,
-          currentPrice: item.unitPrice
-        });
-
-        try {
-          let newPrice = null;
-          
-          // Get fresh price from original source
-          if (item.materialType === 'rawMaterial') {
-            console.log('🔍 Looking up raw material with ID:', item.materialInternalId);
-            
-            // Try multiple lookup strategies
-            let material = await RawMaterialService.getRawMaterialByInternalId(item.materialInternalId);
-            
-            if (!material) {
-              console.log('⚠️ InternalId lookup failed, trying Firebase document ID...');
-              try {
-                material = await RawMaterialService.getRawMaterial(item.id);
-              } catch (e) {
-                console.log('⚠️ Firebase ID lookup also failed');
-              }
-            }
-            
-            if (!material) {
-              console.log('⚠️ All lookups failed, trying to find by name...');
-              try {
-                const allMaterials = await RawMaterialService.getAllRawMaterials();
-                material = allMaterials.find(m => m.name === item.materialName);
-                console.log('🔍 Found by name:', material ? 'YES' : 'NO');
-              } catch (e) {
-                console.log('⚠️ Name lookup also failed');
-              }
-            }
-            
-            newPrice = parseFloat(material?.price) || null;
-            console.log('🔍 Final raw material result:', {
-              found: !!material,
-              price: material?.price,
-              newPrice: newPrice
-            });
-            
-          } else if (item.materialType === 'localProduct') {
-            console.log('🔍 Looking up local product with ID:', item.materialInternalId);
-            
-            // Try multiple lookup strategies
-            let product = await LocalProductService.getLocalProductByInternalId(item.materialInternalId);
-            
-            if (!product) {
-              console.log('⚠️ InternalId lookup failed, trying Firebase document ID...');
-              try {
-                product = await LocalProductService.getLocalProduct(item.id);
-              } catch (e) {
-                console.log('⚠️ Firebase ID lookup also failed');
-              }
-            }
-            
-            if (!product) {
-              console.log('⚠️ All lookups failed, trying to find by name...');
-              try {
-                const allProducts = await LocalProductService.getAllLocalProducts();
-                product = allProducts.find(p => p.name === item.materialName);
-                console.log('🔍 Found by name:', product ? 'YES' : 'NO');
-              } catch (e) {
-                console.log('⚠️ Name lookup also failed');
-              }
-            }
-            
-            newPrice = parseFloat(product?.price) || null;
-            console.log('🔍 Final local product result:', {
-              found: !!product,
-              price: product?.price,
-              newPrice: newPrice
-            });
-            
-          } else if (item.materialType === 'foreignProduct') {
-            console.log('🔍 Looking up foreign product with ID:', item.materialInternalId);
-            
-            // Try multiple lookup strategies
-            let product = await ForeignProductService.getForeignProductByInternalId(item.materialInternalId);
-            
-            if (!product) {
-              console.log('⚠️ InternalId lookup failed, trying Firebase document ID...');
-              // Try using the item's Firebase ID instead
-              try {
-                product = await ForeignProductService.getForeignProduct(item.id);
-              } catch (e) {
-                console.log('⚠️ Firebase ID lookup also failed');
-              }
-            }
-            
-            if (!product) {
-              console.log('⚠️ All lookups failed, trying to find by name...');
-              // Last resort: try to find by name
-              try {
-                const allProducts = await ForeignProductService.getAllForeignProducts();
-                product = allProducts.find(p => p.name === item.materialName);
-                console.log('🔍 Found by name:', product ? 'YES' : 'NO');
-              } catch (e) {
-                console.log('⚠️ Name lookup also failed');
-              }
-            }
-            
-            newPrice = parseFloat(product?.price) || null;
-            console.log('🔍 Final foreign product result:', {
-              found: !!product,
-              price: product?.price,
-              newPrice: newPrice
-            });
-          }
-
-          // FORCE SHOW VALUES for debugging
-          console.log('🔍 EXACT VALUES:', {
-            itemName: item.materialName,
-            currentUnitPrice: item.unitPrice,
-            currentUnitPriceType: typeof item.unitPrice,
-            sourcePrice: newPrice,
-            sourcePriceType: typeof newPrice,
-            areEqual: newPrice === item.unitPrice,
-            willUpdate: newPrice !== null && newPrice !== item.unitPrice
-          });
-
-          if (newPrice !== null && newPrice !== item.unitPrice) {
-            console.log('💰 UPDATING PRICE for', item.materialName, ':', item.unitPrice, '→', newPrice);
-            const updatedItem = {
-              ...item,
-              unitPrice: newPrice,
-              totalPrice: newPrice * (item.quantity || 1)
-            };
-            updatedItems.push(updatedItem);
-            updatedCount++;
-          } else {
-            console.log('✅ NO UPDATE for', item.materialName, '- Current:', item.unitPrice, 'Source:', newPrice);
-            updatedItems.push(item);
-          }
-        } catch (error) {
-          console.error('❌ Failed to refresh item:', item.materialName, error);
-          updatedItems.push(item); // Keep original if refresh fails
-        }
-      }
-
-      // Update state with all items (refreshed + unchanged)
-      setProductItems(updatedItems);
-      
-      // 🚀 ENHANCED: Save the manufactured product with updated prices to database
-      if (isEditing && updatedCount > 0) {
-        try {
-          console.log('💾 Saving manufactured product with updated prices to database...');
-          
-          // Calculate the new estimated value based on updated items
-          const newEstimatedValue = updatedItems.reduce((total, item) => {
-            return total + ((item.unitPrice || 0) * (item.quantity || 1));
-          }, 0);
-          
-          // Update the form data with new estimated value
-          setFormData(prev => ({
-            ...prev,
-            estimatedValue: newEstimatedValue.toString()
-          }));
-          
-          // Prepare the updated product data
-          const updatedProductData = {
-            ...formData,
-            estimatedValue: newEstimatedValue.toString(),
-            items: updatedItems, // Save the updated items array
-            updatedAt: new Date(),
-            lastPriceRefresh: new Date()
-          };
-          
-          // Save to database
-          await ManufacturedProductService.updateManufacturedProduct(id, updatedProductData);
-          
-          // Log the activity
-          const currentUser = getCurrentUser();
-          logActivity('task', `${currentUser.name} حدث أسعار المنتج المصنع`, `تم تحديث ${updatedCount} بند وحفظ المنتج: ${formData.title || 'غير محدد'}`);
-          
-          console.log('✅ Manufactured product saved successfully with updated prices');
-          
-          // Show enhanced success message
-          // Price update completed - no automatic message needed
-          
-          // 🎯 NAVIGATE: Automatically navigate to manufactured products list
-          setTimeout(() => {
-            console.log('🧭 Navigating to manufactured products list...');
-            navigate('/manufactured-products');
-          }, 1500); // Small delay to show success message
-          
-        } catch (saveError) {
-          console.error('❌ Failed to save manufactured product:', saveError);
-          showError(`تم تحديث الأسعار ولكن فشل حفظ المنتج: ${saveError?.message || saveError}`, 'تحذير');
-        }
-      } else if (updatedCount > 0) {
-        // Price update completed - no automatic message needed
-      } else {
-        // All prices are up to date - no automatic message needed
-      }
-
-    } catch (error) {
-      console.error('🚨 Refresh failed:', error);
-      showError(`فشل في تحديث الأسعار: ${error?.message || error}`, 'خطأ في التحديث');
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  // Initialize authentication
+  // 🧠 SENIOR REACT: SINGLE SOURCE OF TRUTH - Consolidated initialization
   useEffect(() => {
-    const initAuth = async () => {
+    const initializeData = async () => {
       try {
-        console.log('🔐 Initializing Firebase authentication...');
+        setLoadingData(true);
+        console.log('🚀 SENIOR REACT: Starting unified data initialization...');
         
-        // Check if user is already authenticated
-        if (auth.currentUser) {
-          console.log('✅ User already authenticated:', auth.currentUser.uid);
-          setAuthReady(true);
-          return;
+        // 🔍 STEP 1: Check for pending items ONLY for NEW products
+        if (!id) {
+          console.log('📦 NEW PRODUCT: Loading pending product items...');
+          const pendingItems = await FirestorePendingDataService.getPendingProductItems();
+          if (pendingItems && Array.isArray(pendingItems) && pendingItems.length > 0) {
+            console.log('✅ NEW PRODUCT: Found', pendingItems.length, 'pending items - SETTING STATE IMMEDIATELY');
+            console.log('📋 PENDING ITEMS DATA:', pendingItems.map(item => ({
+              id: item.internalId || item.materialInternalId,
+              name: item.materialName || item.name || 'UNNAMED'
+            })));
+            
+            setProductItems(pendingItems);
+            
+            // ✅ Load item IDs for duplicate prevention in new product mode
+            const newProductIds = pendingItems.map(item => 
+              item.internalId || item.materialInternalId || item.id
+            ).filter(id => id);
+            setSelectedItemIds(newProductIds);
+            console.log('✅ Loaded item IDs for new product mode:', newProductIds);
+            
+            console.log('🎯 NEW PRODUCT STATE SET: Items initialized with pending data');
+          } else {
+            console.log('📦 NEW PRODUCT: No pending items found');
+          }
+        } else {
+          console.log('🏷️ EDIT MODE: Skipping pending items check - will load from saved product');
         }
         
-        // Wait for auth state to be determined
-        const unsubscribe = onAuthStateChanged(auth, async (user) => {
-          if (user) {
-            console.log('✅ User authenticated:', user.uid);
-            setAuthReady(true);
-          } else {
-            console.log('❌ No user found - authentication required through login page');
-            // REMOVED: Automatic anonymous sign-in to force proper login
-            setAuthReady(false);
+        if (id) {
+          // 🧠 SENIOR REACT: EDIT MODE REWRITTEN TO MATCH CREATION MODE EXACTLY
+          console.log('🎯 EDIT MODE: Starting - IDENTICAL to creation mode logic');
+          
+          const product = await ManufacturedProductService.getManufacturedProductById(id);
+          if (!product) {
+            console.error('❌ EDIT MODE: Product not found');
+            return;
           }
-        });
+          
+          console.log('📄 EDIT MODE: Product loaded:', product.title);
+          
+          // STEP 1: Handle saved form data (EXACTLY like creation mode)
+          const savedFormData = await FirestorePendingDataService.getPendingData(`productFormData_${id}`);
+          if (savedFormData && Object.keys(savedFormData).some(key => savedFormData[key])) {
+            console.log('📋 EDIT MODE: Found saved form changes, using them');
+            const mergedData = { ...product, ...savedFormData };
+            setFormData(mergedData);
+          } else {
+            console.log('📋 EDIT MODE: Using original product data');
+            const restoreFormData = { ...product };
+            
+            // 🔧 FIX: Handle all possible date field variations with safe conversion
+            if (restoreFormData.submissionDeadline) {
+              // Handle Firestore timestamp objects
+              let dateValue = restoreFormData.submissionDeadline;
+              if (dateValue && typeof dateValue === 'object' && dateValue.seconds) {
+                // Firestore timestamp
+                dateValue = new Date(dateValue.seconds * 1000);
+              } else if (dateValue && typeof dateValue === 'object' && dateValue.toDate) {
+                // Firestore timestamp with toDate method
+                dateValue = dateValue.toDate();
+              }
+              restoreFormData.submissionDeadline = formatDateForInput(dateValue);
+            }
+            
+            // Check if there's pending form data (user changes before navigation)
+            const pendingFormData = await FirestorePendingDataService.getPendingData(`productFormData_${id}`);
+            if (pendingFormData) {
+              console.log('📋 EDIT MODE: Found pending form changes, merging with product data');
+              Object.assign(restoreFormData, pendingFormData);
+            }
+            
+            setFormData(restoreFormData);
+          }
+          
+          // 🔧 FIX: ALWAYS load documents and items regardless of form data path
+          // Load documents from product
+          if (product.documents && Array.isArray(product.documents)) {
+            setDocuments(product.documents);
+          }
+          
+          // 🔧 FIX: Load product items WITH pending items merge
+          // Step 1: Get any new pending items from material pages
+          const pendingItems = await FirestorePendingDataService.getPendingProductItems();
+          
+          // Step 2: Start with existing saved items
+          let allProductItems = [];
+          if (product.items && Array.isArray(product.items)) {
+            console.log('✅ EDIT MODE: Found existing saved items:', product.items.length);
+            allProductItems = [...product.items];
+          }
+          
+          // Step 3: Add new pending items if any (with duplicate prevention)
+          if (pendingItems && pendingItems.length > 0) {
+            console.log('📦 EDIT MODE: Found pending items from material pages:', pendingItems.length);
+            
+            // Get existing item IDs for duplicate prevention
+            const existingIds = allProductItems.map(item => 
+              item.internalId || item.materialInternalId || item.id
+            ).filter(id => id);
+            
+            // Filter out duplicates and add new items
+            const newItems = pendingItems.filter(pendingItem => {
+              const pendingId = pendingItem.internalId || pendingItem.materialInternalId || pendingItem.id;
+              return pendingId && !existingIds.includes(pendingId);
+            });
+            
+            if (newItems.length > 0) {
+              console.log('✅ Adding new items to product:', newItems.length);
+              allProductItems = [...allProductItems, ...newItems];
+            } else {
+              console.log('⚠️ All pending items were duplicates, skipping');
+            }
+            
+            // Clear pending items now that we've processed them
+            await FirestorePendingDataService.clearPendingProductItems();
+            console.log('🧹 EDIT MODE: Cleared pending items after merging');
+          }
+          
+          // Step 4: Set the final merged items
+          if (allProductItems.length > 0) {
+            console.log('📦 FINAL ITEMS LIST:', allProductItems.map(item => ({
+              internalId: item.internalId || item.materialInternalId,
+              materialName: item.materialName || item.name,
+              supplierInfo: item.supplierInfo,
+              unitPrice: item.unitPrice,
+              quantity: item.quantity,
+              totalPrice: item.totalPrice
+            })));
+            
+            setProductItems(allProductItems);
+            
+            // Load all item IDs for duplicate prevention
+            const allIds = allProductItems.map(item => 
+              item.internalId || item.materialInternalId || item.id
+            ).filter(id => id);
+            setSelectedItemIds(allIds);
+            console.log('✅ Loaded all item IDs for edit mode:', allIds);
+            
+            // Update estimated value from all items
+            const totalFromItems = allProductItems.reduce((total, item) => {
+              return total + ((item.unitPrice || item.price || 0) * (item.quantity || 1));
+            }, 0);
+            setFormData(prev => ({ ...prev, estimatedValue: totalFromItems.toString() }));
+            
+            console.log('🎯 EDIT MODE STATE SET: Final items count:', allProductItems.length);
+          } else {
+            console.log('📦 EDIT MODE: No items to load');
+          }
+        } else {
+          // NEW PRODUCT MODE: Check for saved form data first, then initialize
+          console.log('🆕 NEW PRODUCT MODE: Checking for saved form data...');
+          
+          // Check for saved form data (from previous navigation to material pages)
+          const savedFormData = await FirestorePendingDataService.getPendingData('productFormData_new');
+          
+          if (savedFormData) {
+            console.log('📋 NEW PRODUCT: Restoring saved form data from previous session');
+            setFormData(savedFormData);
+          } else {
+            console.log('📝 NEW PRODUCT: Starting with fresh empty form');
+            // Start with empty form data for new products
+            setFormData({
+              title: '',
+              referenceNumber: '',
+              description: '',
+              submissionDeadline: '',
+              estimatedValue: ''
+            });
+          }
+          
+          // Check for saved documents
+          const savedDocuments = await FirestorePendingDataService.getPendingData('productDocuments_new');
+          if (savedDocuments && Array.isArray(savedDocuments)) {
+            console.log('📄 NEW PRODUCT: Restoring saved documents');
+            setDocuments(savedDocuments);
+          } else {
+            setDocuments([]);
+          }
+          
+          // Check for pending items (from material selection pages)
+          const pendingItems = await FirestorePendingDataService.getPendingProductItems();
+          
+          if (pendingItems && pendingItems.length > 0) {
+            console.log('🔄 NEW PRODUCT: Found pending items, adding to form');
+            
+            // 🎯 CRITICAL FIX: Only show success message if items are newly added (not reloaded)
+            const isAlreadyShown = await FirestorePendingDataService.getPendingData('product_success_shown_new') === 'true';
+            const shouldShowMessage = productItems.length === 0 && !hasShownSuccessMessage && !isAlreadyShown;
+            
+            setProductItems(pendingItems);
+            
+            // Calculate total from items and update estimated value
+            const totalFromItems = pendingItems.reduce((total, item) => {
+              return total + ((item.unitPrice || 0) * (item.quantity || 1));
+            }, 0);
+            
+            if (totalFromItems > 0) {
+              console.log(`💰 Updating estimated value from items: ${totalFromItems}`);
+              const updatedFormData = { ...(savedFormData || formData), estimatedValue: totalFromItems.toString() };
+              setFormData(updatedFormData);
+              
+              // Save updated form data with calculated total
+              await FirestorePendingDataService.setPendingData('productFormData_new', updatedFormData);
+            }
+            
+            // Only show success message for genuinely new items (not reloads)
+            if (shouldShowMessage) {
+              setHasShownSuccessMessage(true);
+              await FirestorePendingDataService.setPendingData('product_success_shown_new', 'true');
+              showConfirm(
+                `تم إضافة ${pendingItems.length} عنصر للمنتج المصنع بنجاح.\n\nيمكنك الآن مراجعة البنود ومتابعة ملء بيانات المنتج.`,
+                () => {}, // Empty callback - just close the dialog
+                'تمت إضافة البنود',
+                'موافق', // OK button
+                '', // No cancel button
+                false // Don't show cancel
+              );
+            } else {
+              console.log('🔕 Success message skipped (items already exist or already shown)');
+            }
+          } else {
+            // No pending items
+            setProductItems([]);
+          }
+          
+          console.log('✅ NEW PRODUCT: Form initialized with persistence');
+        }
         
-        return unsubscribe;
+        console.log('✅ Data initialization completed');
+        
       } catch (error) {
-        console.error('❌ Auth initialization error:', error);
-        showError('فشل في تهيئة المصادقة. يرجى إعادة تحميل الصفحة.', 'خطأ في التهيئة');
+        console.error('Error initializing data:', error);
+        showError('فشل في تحميل البيانات', 'خطأ');
+      } finally {
+        setLoadingData(false);
       }
     };
     
-    initAuth();
+    initializeData();
+  }, [id]); // Only depend on id
+
+  // 🔒 SELECTIVE CLEANUP: Only clear on true unmount, not navigation
+  useEffect(() => {
+    return () => {
+      // ℹ️ Don't clear pending items on every navigation - let them persist for pickup
+      console.log('🔒 COMPONENT UNMOUNT: Keeping pending items for next navigation');
+    };
   }, []);
 
-  // Load existing product if editing (wait for auth to be ready)
-  useEffect(() => {
-    const loadData = async () => {
-      if (isEditing) {
-        await loadProduct();
-      } else {
-        // NEW MANUFACTURED PRODUCT MODE: Check for pending items first, then initialize empty if none
-        console.log('🆕 NEW MANUFACTURED PRODUCT MODE: Checking for pending items before clearing');
-        
-        // Check for pending items first
-        const pendingItems = await FirestorePendingDataService.getPendingProductItems();
-        const pendingDocuments = await FirestorePendingDataService.getPendingData(`productDocuments_${id || 'new'}`);
-        // Check for saved form data (from previous navigation to material pages) - EXACT SAME as AddTender
-        console.log('🔍 NEW MANUFACTURED PRODUCT: Checking for saved form data...');
-        console.log('🔐 AUTH STATE: authReady =', authReady, 'currentUser =', auth.currentUser ? 'EXISTS' : 'NULL');
-        
-        let savedFormData = null;
-        try {
-          savedFormData = await FirestorePendingDataService.getPendingData('productFormData_new');
-          console.log('📋 NEW MANUFACTURED PRODUCT: Saved form data result:', savedFormData);
-        } catch (error) {
-          console.error('❌ NEW MANUFACTURED PRODUCT: Error loading saved form data:', error);
-          console.error('❌ Error details:', error.message);
-        }
-        
-        if (savedFormData) {
-          console.log('📋 NEW MANUFACTURED PRODUCT: Restoring saved form data from previous session:', savedFormData);
-          setFormData(savedFormData);
-        } else {
-          console.log('📝 NEW MANUFACTURED PRODUCT: Starting with fresh empty form');
-          // Reset to empty form data for new products (same as AddTender pattern)
-          setFormData({
-            title: '',
-            referenceNumber: '',
-            description: '',
-            submissionDeadline: '',
-            estimatedValue: ''
-          });
-        }
-        
-        if (pendingItems && pendingItems.length > 0) {
-          console.log('🔄 NEW MANUFACTURED PRODUCT: Found pending items, loading them first');
-          setProductItems(pendingItems);
-          
-          // Calculate total from items
-          const totalFromItems = pendingItems.reduce((total, item) => {
-            return total + ((item.unitPrice || 0) * (item.quantity || 1));
-          }, 0);
-          
-          if (totalFromItems > 0) {
-            console.log(`💰 Setting estimated value from items: ${totalFromItems}`);
-            setFormData(prev => ({ ...prev, estimatedValue: totalFromItems.toString() }));
-          }
-          
-          // Show manual confirmation message that requires user interaction
-          showConfirm(
-            `تم إضافة ${pendingItems.length} عنصر للمنتج المصنع بنجاح.\n\nيمكنك الآن مراجعة البنود في القائمة أدناه.`,
-            () => {}, // Empty callback - just close the dialog
-            'تمت إضافة البنود',
-            'موافق', // OK button
-            '', // No cancel button
-            false // Don't show cancel
-          );
-        }
-        
-        if (pendingDocuments && pendingDocuments.length > 0) {
-          console.log('📁 NEW MANUFACTURED PRODUCT: Found pending documents, loading them');
-          setDocuments(pendingDocuments);
-        }
-        
-        if (savedFormData) {
-          console.log('📋 NEW MANUFACTURED PRODUCT: Found pending form data, loading it');
-          setFormData(prev => ({ ...prev, ...savedFormData }));
-        }
-        
-        // REMOVED: Aggressive clearing logic that was clearing form data when navigating to material pages
-        // Form data should persist unless explicitly cleared by user action
-        console.log('✅ NEW MANUFACTURED PRODUCT: Initialization completed (form data preserved)');
-        
-        console.log('✅ NEW MANUFACTURED PRODUCT: Initialization completed');
-      }
-      
-      // Also check periodically for pending items (in case navigation timing is off)
-      const checkInterval = setInterval(async () => {
-        const pendingItems = await FirestorePendingDataService.getPendingProductItems();
-        if (pendingItems && pendingItems.length > 0) {
-          console.log('🔄 Periodic check found pending items, loading...');
-          await loadPendingItems();
-        }
-      }, 1000);
-      
-      // Clear interval after 10 seconds to avoid infinite checking
-      setTimeout(() => clearInterval(checkInterval), 10000);
-      
-      return () => clearInterval(checkInterval);
-    };
-    
-    if (authReady) {
-      console.log('🔐 AUTH READY: Starting to load data for manufactured products');
-      loadData();
-    } else {
-      console.log('⏳ AUTH NOT READY: Waiting for authentication...');
-    }
-  }, [id, authReady]);
-
-  // REMOVED: Auto-save useEffect - now using immediate save on handleChange like AddTender
-
-  // 🧠 SENIOR REACT: Multi-level duplicate detection system (EXACT CLONE from AddTender)
+  // 🧠 SENIOR REACT: Multi-level duplicate detection system
   const checkForDuplicates = (existingItems, newItems) => {
     console.log('🧠 SENIOR REACT: Starting advanced duplicate prevention analysis...');
-    console.log('🔍 EXISTING ITEMS:', existingItems.map(item => ({
-      id: item.internalId || item.materialInternalId,
-      name: item.materialName || item.name
-    })));
-    console.log('🔍 NEW ITEMS:', newItems.map(item => ({
-      id: item.internalId || item.materialInternalId,
-      name: item.materialName || item.name
-    })));
     
     const duplicates = [];
     const uniqueItems = [];
@@ -481,8 +342,6 @@ function ManufacturedProductsContent() {
       const materialId = item.materialInternalId || item.internalId;
       const itemName = (item.materialName || item.name || '').toLowerCase().trim();
       
-      console.log('📋 EXISTING ITEM:', { internalId, materialId, itemName });
-      
       if (internalId) existingByInternalId.set(internalId, { item, index });
       if (materialId) existingByMaterialId.set(materialId, { item, index });
       if (itemName) existingByName.set(itemName, { item, index });
@@ -493,14 +352,11 @@ function ManufacturedProductsContent() {
       const newMaterialId = newItem.materialInternalId || newItem.internalId;
       const newItemName = (newItem.materialName || newItem.name || '').toLowerCase().trim();
       
-      console.log('🆕 CHECKING NEW ITEM:', { newInternalId, newMaterialId, newItemName });
-      
       let isDuplicate = false;
       let duplicateInfo = null;
       
       // Check for ID-based duplicates (highest priority)
       if (newInternalId && existingByInternalId.has(newInternalId)) {
-        console.log('🚨 DUPLICATE BY INTERNAL ID:', newInternalId);
         isDuplicate = true;
         duplicateInfo = {
           type: 'ID',
@@ -508,7 +364,6 @@ function ManufacturedProductsContent() {
           matchedItem: existingByInternalId.get(newInternalId).item
         };
       } else if (newMaterialId && existingByMaterialId.has(newMaterialId)) {
-        console.log('🚨 DUPLICATE BY MATERIAL ID:', newMaterialId);
         isDuplicate = true;
         duplicateInfo = {
           type: 'ID',
@@ -518,7 +373,6 @@ function ManufacturedProductsContent() {
       }
       // Check for name-based duplicates (lower priority)
       else if (newItemName && existingByName.has(newItemName)) {
-        console.log('🚨 DUPLICATE BY NAME:', newItemName);
         isDuplicate = true;
         duplicateInfo = {
           type: 'NAME',
@@ -536,7 +390,7 @@ function ManufacturedProductsContent() {
         });
       } else {
         uniqueItems.push(newItem);
-        console.log('✅ UNIQUE ITEM ADDED:', newItem.materialName || newItem.name);
+        console.log('✅ UNIQUE ITEM:', newItem.materialName || newItem.name);
       }
     });
     
@@ -549,93 +403,110 @@ function ManufacturedProductsContent() {
     return { duplicates, uniqueItems };
   };
 
-
-  // Load pending items from Firestore (from material selection pages)
+  // 🧠 SENIOR REACT: Debounced load with protection against multiple calls
+  const loadPendingItemsRef = useRef(false);
+  const componentMountTime = useRef(Date.now());
+  
   const loadPendingItems = async () => {
+    // 🛡️ CRITICAL FIX: Prevent multiple simultaneous calls
+    if (loadPendingItemsRef.current) {
+      console.log('🚫 loadPendingItems already running, skipping...');
+      return;
+    }
+    
+    // 🔧 FIX: Don't load pending items in edit mode if we already have saved items
+    if (id && productItems.length > 0) {
+      console.log('🚫 EDIT MODE: Skipping pending items load - already have saved product items');
+      return;
+    }
+    
     try {
+      loadPendingItemsRef.current = true;
       console.log('🔍 Loading pending product items from Firestore...');
       
       const pendingItems = await FirestorePendingDataService.getPendingProductItems();
       if (pendingItems) {
         const parsedItems = Array.isArray(pendingItems) ? pendingItems : JSON.parse(pendingItems);
         console.log('📦 Found pending product items:', parsedItems.length, 'items');
+        console.log('📋 STORAGE CONTENT:', parsedItems.map(item => ({
+          id: item.internalId || item.materialInternalId,
+          name: item.materialName || item.name
+        })));
         
-        // 🧠 SENIOR REACT: Enhanced duplicate prevention with case-insensitive logic
+        // ✅ ID-based duplicate prevention using selectedItemIds
         setProductItems(prevItems => {
-          // 🛡️ CRITICAL FIX: Only skip if items are truly identical (same length AND same IDs)
-          if (prevItems.length === parsedItems.length && prevItems.length > 0) {
-            // Check if items are actually the same by comparing IDs
-            const prevIds = prevItems.map(item => item.internalId || item.materialInternalId).sort();
-            const parsedIds = parsedItems.map(item => item.internalId || item.materialInternalId).sort();
+          console.log('✅ PROCESSING NEW ITEMS WITH ID-BASED DUPLICATE PREVENTION');
+          
+          // Filter out items that are already selected by ID
+          const newItems = parsedItems.filter(item => {
+            const itemId = item.internalId || item.materialInternalId || item.id;
+            const isDuplicate = itemId && selectedItemIds.includes(itemId);
             
-            const itemsAreSame = prevIds.length === parsedIds.length && 
-              prevIds.every((id, index) => id === parsedIds[index]);
-            
-            if (itemsAreSame) {
-              console.log('🔄 ITEMS UNCHANGED: Same length and same IDs, skipping update');
-              return prevItems; // No change needed
+            if (isDuplicate) {
+              console.log('⚠️ DUPLICATE DETECTED (ID-based):', {
+                itemName: item.materialName || item.name,
+                itemId: itemId,
+                action: 'FILTERED_OUT'
+              });
             }
+            
+            return !isDuplicate;
+          });
+          
+          console.log('✅ DUPLICATE PREVENTION RESULTS:', {
+            totalNewItems: parsedItems.length,
+            duplicatesFiltered: parsedItems.length - newItems.length,
+            itemsToAdd: newItems.length,
+            existingItems: prevItems.length
+          });
+          
+          if (newItems.length === 0) {
+            console.log('📝 No new items to add after duplicate filtering');
+            return prevItems;
           }
           
-          console.log('🔄 ITEMS CHANGED: Different length or different IDs, processing update...');
-          console.log('📊 Prev items:', prevItems.length, 'Parsed items:', parsedItems.length);
+          // Add new items to existing items
+          const allItems = [...prevItems, ...newItems];
           
-          console.log('🛡️ SENIOR REACT: Processing new/changed items...');
-          
-          // 🧠 SENIOR REACT: Simple replacement approach to prevent duplicates
-          let duplicates = [];
-          let uniqueItems = [];
-          
-          if (prevItems.length === 0) {
-            console.log('🆕 EMPTY STATE: Loading initial pending items');
-            duplicates = [];
-            uniqueItems = parsedItems;
-          } else {
-            console.log('🔄 EXISTING STATE: Checking for duplicates');
-            const result = checkForDuplicates(prevItems, parsedItems);
-            duplicates = result.duplicates;
-            uniqueItems = result.uniqueItems;
+          // ✅ Update selectedItemIds with new item IDs
+          if (newItems.length > 0) {
+            const newItemIds = newItems.map(item => 
+              item.internalId || item.materialInternalId || item.id
+            ).filter(id => id);
             
-            // Show duplicate message if needed
-            if (duplicates.length > 0) {
-              const duplicateMessages = duplicates.map(dup => {
-                const matchType = dup.type === 'ID' ? 'معرف مطابق' : 'اسم مطابق';
-                return `⚠️ "${dup.displayName}" (${matchType})`;
-              });
-              
-              showError(
-                `تم العثور على ${duplicates.length} بند مكرر. تم إضافة ${uniqueItems.length} بند جديد فقط.\n\n${duplicateMessages.join('\n')}`,
-                'بنود مكررة'
-              );
-            }
-            
-            console.log('🚨 DUPLICATES BLOCKED:', {
-              count: duplicates.length,
-              names: duplicates.map(d => d.displayName)
+            setSelectedItemIds(prev => {
+              const updatedIds = [...prev, ...newItemIds];
+              console.log('✅ Updated selectedItemIds:', updatedIds);
+              return updatedIds;
             });
           }
-          
-          const allItems = [...prevItems, ...uniqueItems];
           
           // Update estimated value from all items
           const totalFromItems = allItems.reduce((total, item) => {
             return total + ((item.unitPrice || 0) * (item.quantity || 1));
           }, 0);
           
-          setFormData(prev => {
-            return { ...prev, estimatedValue: totalFromItems.toString() };
-          });
+          if (totalFromItems > 0) {
+            setFormData(prev => ({ ...prev, estimatedValue: totalFromItems.toString() }));
+          }
           
-          console.log('🛡️ SENIOR REACT DUPLICATE PREVENTION RESULT:', {
-            existingCount: prevItems.length,
-            newUniqueItems: uniqueItems.length,
-            duplicatesBlocked: duplicates.length,
+          console.log('🛡️ SENIOR REACT STORAGE REPLACEMENT COMPLETED:', {
+            prevItemsCount: prevItems.length,
+            storageItemsCount: parsedItems.length,
             finalCount: allItems.length,
-            preventionSuccess: duplicates.length === 0 ? 'ALL_UNIQUE' : 'DUPLICATES_FILTERED'
+            replacementSuccess: 'COMPLETE_REPLACEMENT_FROM_STORAGE'
           });
           
           return allItems;
         });
+        
+        // 🔧 FORCE RE-RENDER FIX: Ensure React updates the UI by triggering a state change
+        setTimeout(() => {
+          setProductItems(currentItems => {
+            console.log('🔄 FORCE RE-RENDER: Ensuring UI reflects current items count:', currentItems.length);
+            return [...currentItems]; // Create new array reference to force re-render
+          });
+        }, 100);
         
         // 🔧 FIXED: Don't clear items immediately - keep them until product is saved
         // Items will be cleared when product is submitted or cancelled
@@ -658,112 +529,226 @@ function ManufacturedProductsContent() {
       }
     } catch (error) {
       console.error('Error loading pending items:', error);
+    } finally {
+      // 🛡️ CRITICAL FIX: Always release the lock with longer delay to prevent auto-save race
+      setTimeout(() => {
+        loadPendingItemsRef.current = false;
+        console.log('🔓 Released loadPendingItems lock after 3-second cooldown');
+      }, 3000); // 3 second cooldown to prevent auto-save race condition
     }
   };
 
-
-  // 🧠 SENIOR REACT: Event-driven item loading system (EXACT CLONE from AddTender)
+  // 🚀 SENIOR REACT: Debounced event listeners with protection
+  // 🧠 SENIOR REACT: SIMPLIFIED EVENT HANDLING - No competing initialization
   useEffect(() => {
-    let debounceTimer = null;
-    let initialCheckTimeout = null;
+    const handleCustomEvent = () => {
+      console.log('🔍 Custom event received - reloading items...');
+      loadPendingItems();
+    };
 
-    const handleWindowFocus = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        console.log('🔍 WINDOW FOCUS: Checking for pending product items...');
+    const handleProductItemRestored = (event) => {
+      console.log('🔄 TRASH RESTORE: Product item restored from trash, reloading items...');
+      const { productId, restoredItem } = event.detail || {};
+      
+      // Check if this restoration is for our product
+      if (productId === (id || 'new')) {
+        console.log('✅ RESTORE FOR THIS PRODUCT: Reloading items for product', productId);
         loadPendingItems();
-      }, 500);
+      } else {
+        console.log('ℹ️ RESTORE FOR OTHER PRODUCT: Ignoring restoration for product', productId);
+      }
+    };
+
+    // 🎯 Listen to custom events for item addition and trash restoration
+    window.addEventListener('productItemsAdded', handleCustomEvent);
+    window.addEventListener('productItemRestored', handleProductItemRestored);
+    
+    return () => {
+      // 🧹 CLEANUP: Remove all the event listeners we added
+      window.removeEventListener('productItemsAdded', handleCustomEvent);
+      window.removeEventListener('productItemRestored', handleProductItemRestored);
+    };
+  }, []);
+
+  // 🛡️ SENIOR REACT: Smart auto-save that doesn't interfere with loading new items or deletions
+  const isDeletingRef = useRef(false);
+  
+  useEffect(() => {
+    const autoSaveProductItems = async () => {
+      const timeSinceMount = Date.now() - componentMountTime.current;
+      const isRecentMount = timeSinceMount < 5000; // 5 second grace period
+      const isDeletingOperation = isDeletingRef.current;
+      
+      console.log('🤖 AUTO-SAVE TRIGGERED:', {
+        itemsCount: productItems.length,
+        isLoadingLocked: loadPendingItemsRef.current,
+        timeSinceMount,
+        isRecentMount,
+        isDeletingOperation,
+        willSave: productItems.length > 0 && !loadPendingItemsRef.current && !isRecentMount && !isDeletingOperation
+      });
+      
+      if (productItems.length > 0 && !loadPendingItemsRef.current && !isRecentMount && !isDeletingOperation) {
+        try {
+          await FirestorePendingDataService.setPendingProductItems(productItems);
+          console.log('✅ SMART AUTO-SAVE: Saved product items to Firestore:', productItems.length, 'items');
+          console.log('📋 AUTO-SAVE CONTENT:', productItems.map(item => ({
+            id: item.internalId || item.materialInternalId,
+            name: item.materialName || item.name
+          })));
+        } catch (error) {
+          console.error('Error saving product items:', error);
+        }
+      } else if (loadPendingItemsRef.current) {
+        console.log('🚫 SMART AUTO-SAVE: Skipping save during item loading to prevent race condition');
+      } else if (isRecentMount) {
+        console.log('🚫 SMART AUTO-SAVE: Skipping save - component recently mounted, allowing time for item loading');
+      } else if (isDeletingOperation) {
+        console.log('🚫 SMART AUTO-SAVE: Skipping save during deletion operation to prevent restoring deleted items');
+      } else if (productItems.length === 0) {
+        console.log('🚫 SMART AUTO-SAVE: Skipping save for empty items array');
+      }
+    };
+    
+    // 🛡️ CRITICAL FIX: Longer timeout to prevent race condition with loading
+    const timeoutId = setTimeout(autoSaveProductItems, 2000);
+    return () => clearTimeout(timeoutId);
+  }, [productItems]);
+
+  // Auto-save documents to session storage
+  useEffect(() => {
+    const autoSaveDocuments = async () => {
+      if (documents.length > 0) {
+        try {
+          await FirestorePendingDataService.setPendingData(`productDocuments_${id || 'new'}`, documents);
+          console.log('Saved product documents to Firestore:', documents.length, 'documents');
+        } catch (error) {
+          console.error('Error saving product documents:', error);
+        }
+      }
+    };
+    
+    const timeoutId = setTimeout(autoSaveDocuments, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [documents, id]);
+
+  // Listen for document restoration from trash
+  useEffect(() => {
+    const currentProductId = id || 'new';
+    
+    const handleStorageEvent = (event) => {
+      const expectedKey = `productDocuments_${currentProductId}`;
+      
+      console.log('💾 Storage event detected:', {
+        key: event.key,
+        expectedKey: expectedKey,
+        isMatch: event.key === expectedKey
+      });
+      
+      if (event.key === expectedKey && event.newValue) {
+        try {
+          const restoredDocuments = JSON.parse(event.newValue);
+          console.log('📄 Restoring documents from storage event:', restoredDocuments.length);
+          setDocuments(restoredDocuments);
+          
+          // Find the most recently restored document
+          const recentlyRestored = restoredDocuments
+            .filter(doc => doc.restoredFrom === 'trash')
+            .sort((a, b) => new Date(b.restoredAt || 0) - new Date(a.restoredAt || 0))[0];
+            
+          if (recentlyRestored) {
+            // Document restored - no automatic message needed
+            
+            // Log activity
+            const currentUser = getCurrentUser();
+            logActivity('file', `${currentUser.name} استعاد وثيقة من المهملات`, `تم استعادة: ${recentlyRestored.fileName}`);
+          }
+        } catch (error) {
+          console.error('Error parsing restored documents:', error);
+        }
+      }
     };
 
     const handleCustomEvent = (event) => {
-      console.log('🎯 CUSTOM EVENT: productItemsAdded detected');
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        loadPendingItems();
-      }, 300);
-    };
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        console.log('🔍 PAGE VISIBLE: Checking for pending product items...');
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          loadPendingItems();
-        }, 500);
+      const { productId, restoredDocument, allDocuments } = event.detail;
+      
+      console.log('🎯 Custom restore event detected:', {
+        eventProductId: productId,
+        currentProductId: currentProductId,
+        isMatch: productId === currentProductId,
+        documentName: restoredDocument?.fileName
+      });
+      
+      if (productId === currentProductId) {
+        console.log('📄 Updating documents from custom event:', allDocuments.length);
+        setDocuments([...allDocuments]); // Force new array reference
+        
+        // Document restored from trash - no automatic message needed
+        
+        // Log activity
+        const currentUser = getCurrentUser();
+        logActivity('file', `${currentUser.name} استعاد وثيقة من المهملات`, `تم استعادة: ${restoredDocument.fileName}`);
       }
     };
 
-    // Add event listeners
-    if (authReady) {
-      console.log('🎧 ADDING EVENT LISTENERS for product item detection');
-      
-      // Initial check after a delay
-      initialCheckTimeout = setTimeout(() => {
-        console.log('🔍 INITIAL CHECK: Looking for pending product items...');
-        loadPendingItems();
-      }, 1000);
-    }
+    // Add both event listeners
+    window.addEventListener('storage', handleStorageEvent);
+    window.addEventListener('productDocumentRestored', handleCustomEvent);
     
-    window.addEventListener('focus', handleWindowFocus);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('productItemsAdded', handleCustomEvent);
-
     return () => {
-      window.removeEventListener('focus', handleWindowFocus);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('productItemsAdded', handleCustomEvent);
-      
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
-      }
-      if (initialCheckTimeout) {
-        clearTimeout(initialCheckTimeout);
+      window.removeEventListener('storage', handleStorageEvent);
+      window.removeEventListener('productDocumentRestored', handleCustomEvent);
+    };
+  }, [id, showSuccess, getCurrentUser, logActivity]);
+
+  // Calculate total estimated value from ID-based product items with dynamic pricing
+  // SENIOR REACT: Simple reflection of pre-calculated totals (instant display)
+  const getTotalEstimatedValue = useCallback(() => {
+    if (!productItems || productItems.length === 0) return 0;
+    
+    // Simply sum the already calculated totalPrice from each item
+    const total = productItems.reduce((sum, item) => {
+      return sum + (item.totalPrice || 0);
+    }, 0);
+    
+    console.log('📊 INSTANT: Reflecting pre-calculated total from items:', total);
+    return total;
+  }, [productItems]);
+
+  // SENIOR REACT: Controlled estimated value updates - only when explicitly triggered
+  const updateEstimatedValue = useCallback(() => {
+    const currentTotal = productItems.reduce((sum, item) => {
+      return sum + (item.totalPrice || 0);
+    }, 0);
+    
+    setFormData(prev => ({
+      ...prev,
+      estimatedValue: currentTotal.toString()
+    }));
+    
+    console.log('💰 CONTROLLED: Updated estimated value explicitly:', currentTotal);
+    return currentTotal;
+  }, [productItems]);
+
+  // Auto-save form data to session storage
+  useEffect(() => {
+    const autoSaveFormData = async () => {
+      if (Object.keys(formData).some(key => formData[key])) {
+        try {
+          await FirestorePendingDataService.setPendingData(`productFormData_${id || 'new'}`, formData);
+          console.log('💾 Saved product form data for navigation persistence:', formData.title || 'New Product');
+        } catch (error) {
+          console.error('Error saving form data:', error);
+        }
       }
     };
-  }, [authReady]);
-
-  const loadProduct = async () => {
-    if (!id) return;
     
-    try {
-      setLoadingData(true);
-      console.log('🔍 Loading manufactured product:', id);
-      
-      const product = await ManufacturedProductService.getManufacturedProductById(id);
-      
-      const formattedProduct = {
-        ...product,
-        submissionDeadline: product.submissionDeadline ? 
-          formatDateForInput(product.submissionDeadline) : ''
-      };
-      
-      setFormData(formattedProduct);
-      
-      // Load documents if they exist
-      if (product.documents && Array.isArray(product.documents)) {
-        // Filter valid documents with proper fileURL
-        const validDocuments = product.documents.filter(doc => 
-          doc && typeof doc === 'object' && doc.fileName && doc.fileURL
-        );
-        setDocuments(validDocuments);
-        // Documents will be loaded from Firestore directly, no need for pending data
-        console.log('✅ Loaded product documents from Firebase database:', validDocuments.length);
-      }
-      
-      // Load items if they exist  
-      if (product.items && Array.isArray(product.items)) {
-        setProductItems(product.items);
-        // Items will be loaded from Firestore directly, no need for pending data
-      }
-      
-      console.log('✅ Loaded manufactured product successfully:', product.title);
-      
-    } catch (error) {
-      console.error('❌ Error loading manufactured product:', error);
-      showError(`فشل في تحميل بيانات المنتج: ${error.message}`, 'خطأ في التحميل');
-    } finally {
-      setLoadingData(false);
-    }
+    const timeoutId = setTimeout(autoSaveFormData, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [formData, id]);
+
+  const handleToggle = () => {
+    setSidebarCollapsed(!sidebarCollapsed);
   };
 
   const handleChange = async (e) => {
@@ -775,7 +760,7 @@ function ManufacturedProductsContent() {
     
     setFormData(newFormData);
     
-    // Save form data to FirestorePendingDataService for persistence during navigation - EXACT SAME as AddTender
+    // Save form data to FirestorePendingDataService for persistence during navigation
     try {
       const formKey = id ? `productFormData_${id}` : 'productFormData_new';
       await FirestorePendingDataService.setPendingData(formKey, newFormData);
@@ -784,11 +769,10 @@ function ManufacturedProductsContent() {
       console.error('Error saving form data:', error);
     }
     
-    // Clear error for this field when user starts typing
     if (errors[name]) {
       setErrors(prev => ({
         ...prev,
-        [name]: undefined
+        [name]: ''
       }));
     }
   };
@@ -834,205 +818,90 @@ function ManufacturedProductsContent() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (loading) return;
-    
-    if (!authReady) {
-      showError('جار تهيئة المصادقة، يرجى المحاولة مرة أخرى', 'المصادقة غير جاهزة');
-      return;
-    }
-    
     const isValid = await validateForm();
     if (!isValid) {
       showError('يرجى تصحيح الأخطاء المذكورة أعلاه', 'بيانات غير صحيحة');
       return;
     }
-    
+
+    setLoading(true);
+    setErrors({});
+
     try {
-      setLoading(true);
-      console.log('💾 Saving manufactured product...');
-      
-      // Prepare data with embedded documents and items
-      const dataToSave = {
+      // SENIOR REACT: Calculate and store estimated value in database
+      const calculatedTotal = productItems.reduce((sum, item) => {
+        return sum + (item.totalPrice || 0);
+      }, 0);
+
+      const productData = { 
         ...formData,
-        documents: documents || [],
-        items: productItems || []
+        submissionDeadline: formData.submissionDeadline ? new Date(formData.submissionDeadline) : null,
+        estimatedValue: calculatedTotal, // Store calculated total in database
+        documents: documents, // Documents saved to Firebase
+        items: productItems || [] // Product items saved to Firebase 
       };
       
-      let savedProduct;
+      console.log('💾 Saving complete product data to Firebase with calculated total:', {
+        title: productData.title,
+        estimatedValue: calculatedTotal,
+        documentsCount: (productData.documents || []).length,
+        itemsCount: (productData.items || []).length
+      });
       
+      let result;
       if (isEditing) {
-        savedProduct = await ManufacturedProductService.updateManufacturedProduct(id, dataToSave);
+        result = await ManufacturedProductService.updateManufacturedProduct(id, productData);
         
-        // Log activity
-        const user = getCurrentUser();
-        logActivity('task', `${user.name} عدل منتج مصنع`, `تم تعديل: ${formData.title}`);
+        const currentUser = getCurrentUser();
+        await logActivity('task', `${currentUser.name} عدل منتج مصنع`, `تم تعديل المنتج: ${productData.title}`);
         
-        showSuccess('تم تحديث المنتج المصنع بنجاح!', 'تم التحديث');
-        
-        // Clear pending data after successful save (cleanup) - EXACT SAME as AddTender
+        // Clear pending data after successful update
         await FirestorePendingDataService.clearPendingData(`productFormData_${id}`);
         await FirestorePendingDataService.clearPendingData(`productDocuments_${id}`);
         await FirestorePendingDataService.clearPendingProductItems();
         
-        // Navigate to list after successful update
-        setTimeout(() => {
-          navigate('/manufactured-products');
-        }, 2000);
-        
+        showSuccess('تم تحديث المنتج المصنع بنجاح', 'تم التحديث');
       } else {
-        savedProduct = await ManufacturedProductService.createManufacturedProduct(dataToSave);
+        result = await ManufacturedProductService.createManufacturedProduct(productData);
         
-        // Log activity
-        const user = getCurrentUser();
-        logActivity('task', `${user.name} أضاف منتج مصنع جديد`, `تم إضافة: ${formData.title}`);
+        const currentUser = getCurrentUser();
+        await logActivity('task', `${currentUser.name} أضاف منتج مصنع`, `تم إضافة المنتج: ${productData.title}`);
         
-        showSuccess('تم إضافة المنتج المصنع بنجاح!', 'تم الحفظ');
-        
-        // Clear pending data after successful save (cleanup) - EXACT SAME as AddTender
+        // Clear pending data after successful creation
         await FirestorePendingDataService.clearPendingData('productFormData_new');
         await FirestorePendingDataService.clearPendingData('productDocuments_new');
         await FirestorePendingDataService.clearPendingProductItems();
         
-        // Navigate to list after successful creation
-        setTimeout(() => {
-          navigate('/manufactured-products');
-        }, 2000);
+        // Clear success message flag for next product
+        await FirestorePendingDataService.clearPendingData('product_success_shown_new');
+        
+        showSuccess('تم إضافة المنتج المصنع بنجاح', 'تمت الإضافة');
       }
       
-      console.log('✅ Manufactured product saved successfully:', savedProduct?.id || 'unknown');
+      setTimeout(() => {
+        navigate('/manufactured-products');
+      }, 1500);
       
     } catch (error) {
-      console.error('❌ Error saving manufactured product:', error);
-      showError(`فشل في حفظ المنتج: ${error.message}`, 'خطأ في الحفظ');
-      setErrors(prev => ({
-        ...prev,
-        submit: `فشل في حفظ المنتج: ${error.message}`
-      }));
+      setErrors({ submit: error.message });
+      showError('فشل في حفظ المنتج المصنع', 'خطأ في الحفظ');
     } finally {
       setLoading(false);
     }
   };
 
-  // Calculate total estimated value from items
-  const getTotalEstimatedValue = useCallback(() => {
-    if (!productItems || productItems.length === 0) return 0;
-    
-    const total = productItems.reduce((sum, item) => {
-      return sum + (item.totalPrice || 0);
-    }, 0);
-    
-    console.log('📊 INSTANT: Reflecting pre-calculated total from items:', total);
-    return total;
-  }, [productItems]);
-
-  // REMOVED: Duplicate form persistence useEffect (consolidated into auto-save above)
-
-  const handleOpenItemModal = () => {
-    setShowItemModal(true);
-  };
-
-  const handleItemSelect = (itemType) => {
-    console.log('🔧 Manufacturing Item Selected:', itemType);
-    setSelectedItemType(itemType);
-    
-    // Navigate to dedicated component selection pages for manufacturing
-    const routes = {
-      'raw-materials': `/manufactured-products/raw-materials/${id || 'new'}`,
-      'local-product': `/manufactured-products/local-products/${id || 'new'}`,
-      'imported-product': `/manufactured-products/foreign-products/${id || 'new'}`,
-      'manufactured-product': `/manufactured-products/edit/${id || 'new'}`
-    };
-    
-    const route = routes[itemType];
-    if (route && itemType !== 'manufactured-product') {
-      navigate(route);
-    }
-  };
-
-
-  // Function to remove product item - EXACT SAME as AddTender (simple direct removal)
-  const removeProductItem = async (indexToRemove) => {
-    setProductItems(prevItems => {
-      const updatedItems = prevItems.filter((_, index) => index !== indexToRemove);
-      // Update Firestore immediately
-      FirestorePendingDataService.setPendingData(`productItems_${id || 'new'}`, updatedItems);
-      return updatedItems;
-    });
-  };
-
-  // Function to open edit modal for an item
-  const handleEditItem = (item, index) => {
-    console.log('🔧 handleEditItem called with:', { item, index });
-    console.log('🔧 Opening edit modal for item:', item);
-    
-    setEditingItem({
-      ...item,
-      quantity: item.quantity || 1
-    });
-    setEditingItemIndex(index);
-    setShowEditModal(true);
-    
-    console.log('🔧 Edit modal state should be open now');
-  };
-
-  // Function to handle quantity change in edit modal
-  const handleEditQuantityChange = (newQuantity) => {
-    // Allow any positive number for manual input, no restrictions
-    const quantity = Math.max(0, parseFloat(newQuantity) || 0);
-    setEditingItem(prev => ({
-      ...prev,
-      quantity: Number(quantity.toFixed(1)),
-      totalPrice: (prev.unitPrice || 0) * Number(quantity.toFixed(1))
-    }));
-  };
-
-  // Function to save edited item
-  const handleSaveEditedItem = () => {
-    console.log('🔧 handleSaveEditedItem called');
-    
-    if (!editingItem || editingItemIndex === -1) {
-      showError('بيانات البند غير صحيحة', 'خطأ في البيانات');
-      return;
-    }
-
-    setProductItems(prevItems => {
-      const updatedItems = [...prevItems];
-      updatedItems[editingItemIndex] = editingItem;
-      
-      // Update Firestore immediately
-      FirestorePendingDataService.setPendingData(`productItems_${id || 'new'}`, updatedItems);
-      
-      console.log('✅ Item updated successfully:', editingItem);
-      return updatedItems;
-    });
-
-    // Close modal
-    setShowEditModal(false);
-    setEditingItem(null);
-    setEditingItemIndex(-1);
-    
-    // Don't show success message to prevent any side effects
-    // showSuccess('تم تحديث البند بنجاح', 'تم التحديث');
-    console.log('✅ Item updated and modal closed');
-  };
-
-  // Function to close edit modal
-  const handleCloseEditModal = () => {
-    console.log('🔧 handleCloseEditModal called');
-    setShowEditModal(false);
-    setEditingItem(null);
-    setEditingItemIndex(-1);
-  };
-
-  // Handle cancel button - Clear pending data like AddTender
   const handleCancel = async () => {
     try {
       // Clear all pending data when canceling product creation
       if (!isEditing) {
-        console.log('🧹 CANCEL: Clearing all pending data for cancelled new manufactured product');
-        await FirestorePendingDataService.clearPendingData(`productFormData_${id || 'new'}`);
-        await FirestorePendingDataService.clearPendingData(`productDocuments_${id || 'new'}`);
+        console.log('🧹 CANCEL: Clearing all pending data for cancelled new product');
+        await FirestorePendingDataService.clearPendingData('productFormData_new');
+        await FirestorePendingDataService.clearPendingData('productDocuments_new'); 
         await FirestorePendingDataService.clearPendingProductItems();
+        
+        // Clear success message flag for next product
+        await FirestorePendingDataService.clearPendingData('product_success_shown_new');
+        
         console.log('✅ CANCEL: All pending data cleared successfully');
       }
     } catch (error) {
@@ -1042,11 +911,171 @@ function ManufacturedProductsContent() {
     navigate('/manufactured-products');
   };
 
-  // Simple document upload using proven fileStorageService - EXACT SAME as AddTender
+  // Modal handlers
+  const handleOpenItemModal = () => {
+    setShowItemModal(true);
+  };
+
+  const handleCloseItemModal = () => {
+    setShowItemModal(false);
+    setSelectedItemType('');
+  };
+
+  const handleItemTypeSelection = (itemType) => {
+    try {
+      console.log('Selected item type:', itemType);
+      
+      switch (itemType) {
+        case 'raw-materials':
+          const navPath = `/manufactured-products/raw-materials/${id || 'new'}`;
+          console.log('Navigating to:', navPath);
+          navigate(navPath);
+          break;
+        case 'local-product':
+          const localProductsPath = `/manufactured-products/local-products/${id || 'new'}`;
+          console.log('Navigating to local products:', localProductsPath);
+          navigate(localProductsPath);
+          break;
+        case 'imported-product':
+          const foreignProductsPath = `/manufactured-products/foreign-products/${id || 'new'}`;
+          console.log('Navigating to foreign products:', foreignProductsPath);
+          navigate(foreignProductsPath);
+          break;
+        default:
+          console.log('Unknown item type:', itemType);
+          showError('نوع البند غير معروف', 'خطأ');
+      }
+    } catch (error) {
+      console.error('Error handling item type selection:', error);
+      showError('فشل في اختيار نوع البند', 'خطأ');
+    }
+  };
+
+  // 🗑️ SENIOR REACT: Delete product item functionality
+  const handleItemDeleteClick = (item, index) => {
+    const itemName = item.materialName || item.name || 'بند غير معروف';
+    showConfirm(
+      `هل أنت متأكد من حذف هذا البند؟\n\n${itemName}`,
+      () => handleItemDeleteConfirm(item, index),
+      'تأكيد حذف البند'
+    );
+  };
+
+  const handleItemDeleteConfirm = async (item, index) => {
+    try {
+      setDeleting(true);
+      // 🛡️ CRITICAL FIX: Set deletion flag to prevent auto-save from restoring deleted items
+      isDeletingRef.current = true;
+      
+      console.log('🗑️ Starting deletion process:', {
+        itemName: item.materialName || item.name,
+        itemId: item.internalId || item.materialInternalId,
+        isDeletingFlag: isDeletingRef.current
+      });
+      
+      // Add product context for proper restoration
+      const itemWithContext = {
+        ...item,
+        productContext: {
+          productId: id || 'new',
+          productTitle: formData.title || 'منتج جديد',
+          addedAt: new Date().toISOString()
+        }
+      };
+      
+      // Move to trash instead of permanent deletion
+      await SimpleTrashService.moveToTrash(itemWithContext, 'productItems');
+      console.log('✅ Successfully moved to trash');
+      
+      // Remove from current list
+      setProductItems(prevItems => {
+        const newItems = prevItems.filter((_, idx) => idx !== index);
+        
+        // Remove item ID from selectedItemIds for duplicate prevention
+        const itemId = item?.internalId || item?.materialInternalId || item?.id;
+        if (itemId) {
+          setSelectedItemIds(prev => prev.filter(id => id !== itemId));
+        }
+        
+        // Recalculate estimated value
+        const currentTotal = newItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
+        setFormData(prev => ({
+          ...prev,
+          estimatedValue: currentTotal.toString()
+        }));
+        
+        console.log('✅ Item removed from list, new count:', newItems.length);
+        return newItems;
+      });
+      
+      // 🛡️ CRITICAL: Clear deletion flag after a delay to allow auto-save to be skipped
+      setTimeout(() => {
+        isDeletingRef.current = false;
+        console.log('✅ Deletion flag cleared, auto-save can resume');
+      }, 5000); // 5 second delay to ensure auto-save doesn't restore the item
+      
+      // Log activity
+      const currentUser = getCurrentUser();
+      const itemName = item.materialName || item.name || 'بند غير معروف';
+      logActivity('task', `${currentUser.name} حذف بند منتج`, `تم حذف البند: ${itemName}`);
+      
+      showSuccess(`تم نقل البند للمهملات: ${itemName}`, 'تم النقل للمهملات');
+    } catch (err) {
+      console.error('❌ Error moving product item to trash:', err);
+      showError(`فشل في نقل البند للمهملات: ${err.message}`, 'خطأ في النقل');
+      // Clear deletion flag on error too
+      isDeletingRef.current = false;
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // 🧠 SENIOR REACT: Edit product item functionality
+  const handleEditItem = (item, index) => {
+    setEditingItem({ ...item });
+    setEditingIndex(index);
+    setShowEditModal(true);
+  };
+
+  const handleQuantityChange = (itemId, newQuantity) => {
+    // Allow any positive number for manual input, no restrictions
+    const quantity = Math.max(0, parseFloat(newQuantity) || 0);
+    setEditingItem(prev => ({
+      ...prev,
+      quantity: Number(quantity.toFixed(1)),
+      totalPrice: (prev.unitPrice || 0) * Number(quantity.toFixed(1))
+    }));
+  };
+
+  const handleConfirmEdit = () => {
+    if (editingIndex !== null && editingItem) {
+      setProductItems(prev => prev.map((item, index) => 
+        index === editingIndex ? editingItem : item
+      ));
+      setShowEditModal(false);
+      setEditingItem(null);
+      setEditingIndex(null);
+      showSuccess('تم تحديث بيانات البند بنجاح', 'تم التحديث');
+    }
+  };
+
+  const handleCloseEditModal = () => {
+    setShowEditModal(false);
+    setEditingItem(null);
+    setEditingIndex(null);
+  };
+
+  const getTotalEditPrice = () => {
+    return Math.round(editingItem?.totalPrice || 0);
+  };
+
+  // Simple document upload using proven fileStorageService - now with file name prompt
   const handleDocumentUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
+
     setUploadingDocument(true);
+
     try {
       // Validate file first - move validation inside try-catch
       try {
@@ -1058,111 +1087,131 @@ function ManufacturedProductsContent() {
         throw new Error(validationError.message);
       }
 
-      // Store file data for name input
+      console.log('📤 Uploading document:', file.name);
+      
+      // Upload to Firebase Storage using proven method
+      const fileData = await fileStorageService.uploadFile(file, 'product-documents');
+      
+      // Store pending file data and show file name modal
       setPendingFileData({
-        file,
+        ...fileData,
         originalFileName: file.name,
         fileSize: file.size,
         fileType: file.type
       });
-      
-      // Show file name modal
+      setCustomFileName(file.name.split('.')[0]); // Default to filename without extension
       setShowFileNameModal(true);
       
-    } catch (error) {
-      console.error('File upload error:', error);
-      showError(`فشل في رفع الملف: ${error.message}`, 'خطأ في الرفع');
-    } finally {
-      setUploadingDocument(false);
       // Clear the file input
+      event.target.value = '';
+    } catch (error) {
+      console.error('Error uploading document:', error);
+      showError(error.message || 'فشل في رفع الملف', 'خطأ في الرفع');
+      
+      // Clear file input on error too
       if (event.target) {
         event.target.value = '';
       }
+    } finally {
+      setUploadingDocument(false);
     }
   };
 
+  // Handle file name confirmation - SAVE TO FIREBASE DATABASE
   const handleFileNameSave = async () => {
     if (!customFileName.trim()) {
-      showError('يرجى إدخال اسم للملف', 'اسم الملف مطلوب');
+      showError('يرجى إدخال اسم الملف', 'اسم الملف مطلوب');
       return;
     }
 
     if (!pendingFileData) {
-      showError('لم يتم العثور على بيانات الملف', 'خطأ في البيانات');
+      showError('بيانات الملف غير متاحة', 'خطأ');
       return;
     }
 
-    setUploadingDocument(true);
-    
     try {
-      console.log('🔄 Starting file upload with custom name:', customFileName);
+      setUploadingDocument(true);
+      console.log('📤 Creating document with Firebase database storage:', customFileName);
       
-      // Upload to Firebase Storage
-      const uploadResult = await fileStorageService.uploadFile(pendingFileData.file, 'product-documents');
-      
-      console.log('✅ File uploaded successfully:', uploadResult);
-      console.log('📄 Download URL for access:', uploadResult.url);
-      
-      // Validate the download URL
-      if (!uploadResult.url || !uploadResult.url.startsWith('https://')) {
-        throw new Error('فشل في الحصول على رابط تحميل صالح من Firebase Storage');
-      }
-      
-      // Create document object
+      // Create document object with consistent structure AND proper date field
       const newDocument = {
-        id: `doc_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        id: Date.now().toString(),
         fileName: customFileName.trim(),
         originalFileName: pendingFileData.originalFileName,
+        fileURL: pendingFileData.url,
+        storagePath: pendingFileData.path,
         fileSize: pendingFileData.fileSize,
         fileType: pendingFileData.fileType,
-        fileURL: uploadResult.url,
-        uploadedAt: new Date().toISOString(),
-        storagePath: uploadResult.path
+        uploadedAt: new Date().toISOString(), // Use uploadedAt like TenderDocumentModal expects
+        uploadDate: new Date().toISOString(), // Keep uploadDate for compatibility
+        productId: id || 'new',
+        productTitle: formData.title || 'منتج مصنع جديد',
+        productReferenceNumber: formData.referenceNumber || 'غير محدد'
       };
       
-      // Add to documents list
+      // Add to documents state (for immediate UI update)
       setDocuments(prev => [...prev, newDocument]);
       
-      // Save to Firestore
-      const updatedDocs = [...documents, newDocument];
-      await FirestorePendingDataService.setPendingData(`productDocuments_${id || 'new'}`, updatedDocs);
+      // CRITICAL: Save to Firebase database if product exists
+      if (id && id !== 'new') {
+        try {
+          console.log('💾 Saving document to Firebase database for existing product:', id);
+          const currentProduct = await ManufacturedProductService.getManufacturedProductById(id);
+          if (currentProduct) {
+            const updatedDocuments = [...(currentProduct.documents || []), newDocument];
+            await ManufacturedProductService.updateManufacturedProduct(id, { 
+              ...currentProduct, 
+              documents: updatedDocuments 
+            });
+            console.log('✅ Document saved to Firebase database successfully');
+          }
+        } catch (dbError) {
+          console.warn('⚠️ Firebase database save failed, document stored locally only:', dbError.message);
+        }
+      } else {
+        // For new products, documents will be saved when the product is created
+        console.log('📋 Document stored locally for new product, will be saved to Firebase when product is created');
+      }
       
-      console.log('✅ Document added to list:', newDocument);
-      
-      // Show success message
       showSuccess(`تم رفع الملف بنجاح: ${customFileName}`, 'تم الرفع');
       
       // Log activity
       const currentUser = getCurrentUser();
-      logActivity('file', `${currentUser.name} رفع ملف للمنتج المصنع`, `رفع: ${customFileName}`);
+      logActivity('file', `${currentUser.name} رفع وثيقة`, `تم رفع الملف: ${customFileName}`);
       
-    } catch (error) {
-      console.error('❌ Error in handleFileNameSave:', error);
-      showError(`فشل في حفظ الملف: ${error.message}`, 'خطأ في الحفظ');
-    } finally {
-      setUploadingDocument(false);
+      // Reset modal state
       setShowFileNameModal(false);
       setPendingFileData(null);
       setCustomFileName('');
+      
+    } catch (error) {
+      console.error('Error saving document:', error);
+      showError(`فشل في رفع الملف: ${error.message}`, 'خطأ في الرفع');
+    } finally {
+      setUploadingDocument(false);
     }
   };
 
+  // Handle file name modal cancel
   const handleFileNameCancel = () => {
+    console.log('User cancelled file upload');
+    
+    // Reset modal state
     setShowFileNameModal(false);
     setPendingFileData(null);
     setCustomFileName('');
   };
 
-  // Exact customer pattern for document deletion - EXACT SAME as AddTender
-  const handleDeleteClick = (document) => {
+  // Exact customer pattern for document deletion
+  const handleDocumentDeleteClick = (document) => {
     showConfirm(
       `هل أنت متأكد من حذف هذا الملف؟\n\n${document.fileName}`,
-      () => handleDeleteConfirm(document),
+      () => handleDocumentDeleteConfirm(document),
       'تأكيد حذف الملف'
     );
   };
 
-  const handleDeleteConfirm = async (document) => {
+  const handleDocumentDeleteConfirm = async (document) => {
     try {
       setDeleting(true);
       
@@ -1172,20 +1221,92 @@ function ManufacturedProductsContent() {
       // Remove from local state (equivalent to "delete from original collection")
       setDocuments(prev => prev.filter(doc => doc.id !== document.id));
       
-      // Update Firestore
-      const updatedDocs = documents.filter(doc => doc.id !== document.id);
-      await FirestorePendingDataService.setPendingData(`productDocuments_${id || 'new'}`, updatedDocs);
-      
-      // Log activity
+      // Log activity for document deletion
       const currentUser = getCurrentUser();
-      logActivity('file', `${currentUser.name} حذف ملف من المنتج المصنع`, `حذف: ${document.fileName}`);
+      logActivity('task', `${currentUser.name} حذف وثيقة`, `تم حذف الوثيقة: ${document.fileName}`);
       
       showSuccess(`تم نقل الملف للمهملات: ${document.fileName}`, 'تم النقل للمهملات');
     } catch (err) {
-      console.error('Error deleting document:', err);
       showError(`فشل في نقل الملف للمهملات: ${err.message}`, 'خطأ في النقل');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  // Robust document restore function
+  const handleDocumentRestore = async (trashedDocument) => {
+    console.log('♻️ ROBUST DOCUMENT RESTORE:', trashedDocument?.fileName);
+    
+    if (!trashedDocument || !trashedDocument.id) {
+      console.error('No valid document provided for restore');
+      showError('لم يتم توفير بيانات صالحة للملف', 'خطأ');
+      return;
+    }
+
+    try {
+      console.log('🔄 Starting robust restore process for document:', trashedDocument.id);
+      
+      // Check if document already exists in current product
+      const existingDoc = documents.find(doc => doc.id === trashedDocument.id);
+      if (existingDoc) {
+        showError(`الملف موجود بالفعل: ${trashedDocument.fileName}`, 'ملف موجود');
+        return;
+      }
+
+      // Check if we're restoring to the correct product
+      const targetProductId = id || 'new';
+      const documentProductId = trashedDocument.productId || 'new';
+      
+      if (targetProductId !== documentProductId) {
+        console.log('⚠️ Document product mismatch - updating product context');
+        // Update product context for proper restoration
+        trashedDocument.productId = targetProductId;
+        trashedDocument.productTitle = formData.title || 'منتج مصنع جديد';
+        trashedDocument.productReferenceNumber = formData.referenceNumber || 'غير محدد';
+      }
+
+      // Create clean document object for restoration
+      const restoredDocument = {
+        id: trashedDocument.id,
+        fileName: trashedDocument.fileName,
+        originalFileName: trashedDocument.originalFileName,
+        fileURL: trashedDocument.fileURL,
+        storagePath: trashedDocument.storagePath,
+        fileSize: trashedDocument.fileSize,
+        fileType: trashedDocument.fileType,
+        uploadDate: trashedDocument.uploadDate,
+        productId: targetProductId,
+        productTitle: formData.title || 'منتج مصنع جديد',
+        productReferenceNumber: formData.referenceNumber || 'غير محدد'
+      };
+
+      // Add document to current state
+      setDocuments(prev => {
+        // Double check for duplicates
+        const filtered = prev.filter(doc => doc.id !== trashedDocument.id);
+        return [...filtered, restoredDocument];
+      });
+      
+      console.log('✅ Document added to local state successfully');
+      
+      // Remove from trash using SimpleTrashService
+      await SimpleTrashService.restoreItem(trashedDocument.id);
+      console.log('✅ Document removed from trash successfully');
+      
+      showSuccess(`تم استعادة الملف بنجاح: ${trashedDocument.fileName}`, 'تمت الاستعادة');
+      
+      // Log activity
+      const currentUser = getCurrentUser();
+      logActivity('file', `${currentUser.name} استعاد وثيقة من المهملات`, `استعادة: ${trashedDocument.fileName}`);
+      
+      console.log('✅ ROBUST DOCUMENT RESTORE COMPLETED SUCCESSFULLY');
+      
+    } catch (error) {
+      console.error('❌ Document restore failed:', error);
+      showError(`فشل في استعادة الملف: ${error.message}`, 'خطأ في الاستعادة');
+      
+      // If restore failed, make sure document is not in local state
+      setDocuments(prev => prev.filter(doc => doc.id !== trashedDocument.id));
     }
   };
 
@@ -1235,6 +1356,7 @@ function ManufacturedProductsContent() {
             </div>
             
             <SidebarButtons />
+            
             
             <div style={{
               height: 'calc(100vh - 200px)',
@@ -1340,35 +1462,6 @@ function ManufacturedProductsContent() {
                             {errors.referenceNumber && <div className="invalid-feedback">{errors.referenceNumber}</div>}
                           </div>
 
-
-                          <div className="col-md-6 mb-3">
-                            <label className="form-label">
-                              التكلفة التقديرية
-                              <small className="text-muted ms-2">(محسوبة تلقائياً من البنود)</small>
-                            </label>
-                            <div className="input-group">
-                              <input
-                                type="text"
-                                className="form-control bg-light"
-                                name="estimatedValue"
-                                value={(() => {
-                                  const storedValue = getTotalEstimatedValue();
-                                  return storedValue > 0 ? `${storedValue.toLocaleString('en-US')} ريال` : '0 ريال';
-                                })()}
-                                readOnly
-                                placeholder="سيتم حسابها من البنود المضافة"
-                                style={{ 
-                                  backgroundColor: '#f8f9fa',
-                                  fontWeight: 'bold',
-                                  color: '#198754'
-                                }}
-                              />
-                              <span className="input-group-text bg-light text-success">
-                                <i className="bi bi-calculator"></i>
-                              </span>
-                            </div>
-                          </div>
-
                           <div className="col-md-6 mb-3">
                             <label className="form-label">تاريخ الإضافة *</label>
                             <div className="input-group">
@@ -1400,10 +1493,33 @@ function ManufacturedProductsContent() {
                             {errors.submissionDeadline && <div className="invalid-feedback">{errors.submissionDeadline}</div>}
                           </div>
 
-
-
-
-
+                          <div className="col-md-6 mb-3">
+                            <label className="form-label">
+                              التكلفة التقديرية
+                              <small className="text-muted ms-2">(محسوبة تلقائياً من البنود)</small>
+                            </label>
+                            <div className="input-group">
+                              <input
+                                type="text"
+                                className="form-control bg-light"
+                                name="estimatedValue"
+                                value={(() => {
+                                  const storedValue = getTotalEstimatedValue();
+                                  return storedValue > 0 ? `${storedValue.toLocaleString('en-US')} ريال` : '0 ريال';
+                                })()}
+                                readOnly
+                                placeholder="سيتم حسابها من البنود المضافة"
+                                style={{ 
+                                  backgroundColor: '#f8f9fa',
+                                  fontWeight: 'bold',
+                                  color: '#198754'
+                                }}
+                              />
+                              <span className="input-group-text bg-light text-success">
+                                <i className="bi bi-calculator"></i>
+                              </span>
+                            </div>
+                          </div>
 
                           <div className="col-md-12 mb-3">
                             <label className="form-label">وصف المنتج</label>
@@ -1418,54 +1534,37 @@ function ManufacturedProductsContent() {
                             />
                           </div>
 
-                          {/* Product Items List - EXACT COPY of tender items */}
-                          {productItems.length > 0 && (
-                            <div className="col-md-12 mb-4">
-                              <div className="card shadow-sm">
-                                <div className="card-header bg-light">
-                                  <div className="d-flex justify-content-between align-items-center">
-                                    <h6 className="mb-0 fw-bold text-primary">
-                                      <i className="bi bi-list-task me-2"></i>
-                                      بنود المنتج ({productItems.length})
-                                    </h6>
-                                    {/* 🧠 SENIOR REACT: Price refresh button */}
-                                    <button 
-                                      type="button" 
-                                      className="btn btn-success btn-sm"
-                                      onClick={refreshAll}
-                                      disabled={refreshing || productItems.length === 0}
-                                      style={{
-                                        fontSize: '12px',
-                                        padding: '4px 12px',
-                                        borderRadius: '4px'
-                                      }}
-                                    >
-                                      {refreshing ? (
-                                        <>
-                                          <span className="spinner-border spinner-border-sm me-1" role="status"></span>
-                                          جار التحديث...
-                                        </>
-                                      ) : (
-                                        <>🔄 تحديث أسعار</>
-                                      )}
-                                    </button>
-                                  </div>
+                          {/* Product Items List */}
+                          {/* Debug logging disabled for performance */}
+                          
+                          {/* 🧠 SENIOR REACT: Always show container for debugging */}
+                          <div className="col-md-12 mb-4">
+                            <div className="card shadow-sm">
+                              <div className="card-header bg-light">
+                                <div className="d-flex justify-content-between align-items-center">
+                                  <h6 className="mb-0 fw-bold text-primary">
+                                    <i className="bi bi-list-task me-2"></i>
+                                    بنود المنتج ({productItems.length}) 
+                                    {productItems.length === 0 && <span className="text-danger">- لا توجد بنود</span>}
+                                  </h6>
                                 </div>
-                                <div className="card-body p-0">
-                                  <div className="table-responsive">
-                                    <table className="table table-hover custom-striped mb-0">
-                                      <thead className="table-light">
-                                        <tr>
-                                          <th className="text-center" style={{ width: '60px' }}>#</th>
-                                          <th className="text-center">اسم المادة</th>
-                                          <th className="text-center" style={{ paddingRight: '20px' }}>الكمية</th>
-                                          <th className="text-center" style={{ paddingRight: '20px' }}>الوحدة</th>
-                                          <th className="text-center" style={{ paddingRight: '20px' }}>السعر الإجمالي</th>
-                                          <th className="text-center" style={{ width: '60px', paddingRight: '20px', paddingLeft: '40px' }}>إجراء</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {productItems.map((item, index) => {
+                              </div>
+                              
+                              <div className="card-body p-0">
+                                <div className="table-responsive">
+                                  <table className="table table-hover custom-striped mb-0">
+                                    <thead className="table-light">
+                                      <tr>
+                                        <th className="text-center" style={{ width: '60px' }}>#</th>
+                                        <th className="text-center">اسم المادة</th>
+                                        <th className="text-center">الكمية</th>
+                                        <th className="text-center">الوحدة</th>
+                                        <th className="text-center">السعر الإجمالي</th>
+                                        <th className="text-center" style={{ width: '60px' }}>إجراء</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {productItems && productItems.length > 0 ? productItems.map((item, index) => {
                                           // Ensure we're working with proper ID-based structure
                                           // Never show the internal ID as display name
                                           let displayName = item.materialName || item.name || 'مادة غير محددة';
@@ -1479,15 +1578,11 @@ function ManufacturedProductsContent() {
                                           const displayPrice = item.totalPrice || 0;
                                           const itemId = item.internalId;
                                           
-                                          // Price highlighting removed
                                           
                                           return (
-                                            <tr 
-                                              key={itemId || `item-${index}`} 
-                                              className=""
-                                              style={{
-                                                backgroundColor: index % 2 === 0 ? '#ffffff' : '#f8f9fa'
-                                              }}>
+                                            <tr key={itemId || `item-${index}`} style={{
+                                              backgroundColor: index % 2 === 0 ? '#ffffff' : '#f8f9fa'
+                                            }}>
                                               <td className="text-center fw-bold text-muted">{index + 1}</td>
                                               <td className="text-center fw-medium">
                                                 <div>
@@ -1520,22 +1615,23 @@ function ManufacturedProductsContent() {
                                                         
                                                         // Get the Firebase document ID by searching with internal ID
                                                         if (materialType === 'rawMaterial') {
-                                                          console.log('Loading raw materials...');
-                                                          const { RawMaterialService } = await import('../services/rawMaterialService');
-                                                          allItems = await RawMaterialService.getAllRawMaterials();
-                                                          console.log('Total raw materials loaded:', allItems.length);
-                                                          console.log('Sample raw material IDs:', allItems.slice(0, 3).map(m => ({ id: m.id, internalId: m.internalId, name: m.name })));
-                                                          
-                                                          // Try multiple matching strategies
-                                                          let material = allItems.find(m => m.internalId === materialInternalId);
+                                                          console.log('Loading raw material...');
+                                                          // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all materials
+                                                          let material = await RawMaterialService.getRawMaterialByInternalId(materialInternalId);
                                                           
                                                           if (!material) {
-                                                            // Try matching by Firebase document ID
-                                                            material = allItems.find(m => m.id === materialInternalId);
+                                                            // Try matching by Firebase document ID as fallback
+                                                            try {
+                                                              material = await RawMaterialService.getRawMaterialById(materialInternalId);
+                                                            } catch (error) {
+                                                              console.log('Could not find material by Firebase ID, trying name fallback...');
+                                                            }
                                                           }
                                                           
                                                           if (!material) {
-                                                            // Try matching by name (as fallback)
+                                                            // Last resort: try matching by name (requires full scan)
+                                                            console.log('Using name fallback - loading all raw materials...');
+                                                            const allItems = await RawMaterialService.getAllRawMaterials();
                                                             const displayName = item.materialName || item.name;
                                                             material = allItems.find(m => m.name === displayName);
                                                           }
@@ -1547,22 +1643,23 @@ function ManufacturedProductsContent() {
                                                             navigate(`/raw-materials/edit/${firebaseId}`);
                                                           }
                                                         } else if (materialType === 'localProduct') {
-                                                          console.log('Loading local products...');
-                                                          const { LocalProductService } = await import('../services/localProductService');
-                                                          allItems = await LocalProductService.getAllLocalProducts();
-                                                          console.log('Total local products loaded:', allItems.length);
-                                                          console.log('Sample local product IDs:', allItems.slice(0, 3).map(p => ({ id: p.id, internalId: p.internalId, name: p.name })));
-                                                          
-                                                          // Try multiple matching strategies
-                                                          let product = allItems.find(p => p.internalId === materialInternalId);
+                                                          console.log('Loading local product...');
+                                                          // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all products
+                                                          let product = await LocalProductService.getLocalProductByInternalId(materialInternalId);
                                                           
                                                           if (!product) {
-                                                            // Try matching by Firebase document ID
-                                                            product = allItems.find(p => p.id === materialInternalId);
+                                                            // Try matching by Firebase document ID as fallback
+                                                            try {
+                                                              product = await LocalProductService.getLocalProductById(materialInternalId);
+                                                            } catch (error) {
+                                                              console.log('Could not find product by Firebase ID, trying name fallback...');
+                                                            }
                                                           }
                                                           
                                                           if (!product) {
-                                                            // Try matching by name (as fallback)
+                                                            // Last resort: try matching by name (requires full scan)
+                                                            console.log('Using name fallback - loading all local products...');
+                                                            const allItems = await LocalProductService.getAllLocalProducts();
                                                             const displayName = item.materialName || item.name;
                                                             product = allItems.find(p => p.name === displayName);
                                                           }
@@ -1574,22 +1671,23 @@ function ManufacturedProductsContent() {
                                                             navigate(`/local-products/edit/${firebaseId}`);
                                                           }
                                                         } else if (materialType === 'foreignProduct') {
-                                                          console.log('Loading foreign products...');
-                                                          const { ForeignProductService } = await import('../services/foreignProductService');
-                                                          allItems = await ForeignProductService.getAllForeignProducts();
-                                                          console.log('Total foreign products loaded:', allItems.length);
-                                                          console.log('Sample foreign product IDs:', allItems.slice(0, 3).map(p => ({ id: p.id, internalId: p.internalId, name: p.name })));
-                                                          
-                                                          // Try multiple matching strategies
-                                                          let product = allItems.find(p => p.internalId === materialInternalId);
+                                                          console.log('Loading foreign product...');
+                                                          // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all products
+                                                          let product = await ForeignProductService.getForeignProductByInternalId(materialInternalId);
                                                           
                                                           if (!product) {
-                                                            // Try matching by Firebase document ID
-                                                            product = allItems.find(p => p.id === materialInternalId);
+                                                            // Try matching by Firebase document ID as fallback
+                                                            try {
+                                                              product = await ForeignProductService.getForeignProductById(materialInternalId);
+                                                            } catch (error) {
+                                                              console.log('Could not find product by Firebase ID, trying name fallback...');
+                                                            }
                                                           }
                                                           
                                                           if (!product) {
-                                                            // Try matching by name (as fallback)
+                                                            // Last resort: try matching by name (requires full scan)
+                                                            console.log('Using name fallback - loading all foreign products...');
+                                                            const allItems = await ForeignProductService.getAllForeignProducts();
                                                             const displayName = item.materialName || item.name;
                                                             product = allItems.find(p => p.name === displayName);
                                                           }
@@ -1624,11 +1722,11 @@ function ManufacturedProductsContent() {
                                                   {/* Hide ID display - only show material name */}
                                                 </div>
                                               </td>
-                                              <td className="text-center" style={{ paddingRight: '20px' }}>
+                                              <td className="text-center">
                                                 <span className="badge bg-primary">{item.quantity || 1}</span>
                                               </td>
-                                              <td className="text-center" style={{ paddingRight: '20px' }}>{displayUnit}</td>
-                                              <td className="text-center" style={{ paddingRight: '20px' }}>
+                                              <td className="text-center">{displayUnit}</td>
+                                              <td className="text-center">
                                                 <div>
                                                   <span className="text-success fw-bold">
                                                     {displayPrice.toLocaleString('en-US')} ر.س
@@ -1642,73 +1740,31 @@ function ManufacturedProductsContent() {
                                                   )}
                                                 </div>
                                               </td>
-                                              <td className="text-center" style={{ paddingRight: '20px', paddingLeft: '40px' }}>
-                                                <div className="d-flex justify-content-center gap-1">
+                                              <td className="text-center">
+                                                {/* SENIOR REACT: Button group with edit and delete */}
+                                                <div className="btn-group btn-group-sm" style={{ marginLeft: '20px' }}>
                                                   <button
-                                                    type="button"
                                                     className="btn btn-outline-primary"
+                                                    type="button"
                                                     onClick={(e) => {
                                                       e.preventDefault();
                                                       e.stopPropagation();
                                                       handleEditItem(item, index);
                                                     }}
-                                                    title="تعديل الكمية"
-                                                    style={{ 
-                                                      width: '27px', 
-                                                      height: '27px', 
-                                                      padding: '0',
-                                                      borderRadius: '6px',
-                                                      fontSize: '14px',
-                                                      display: 'flex',
-                                                      alignItems: 'center',
-                                                      justifyContent: 'center',
-                                                      border: '1px solid #007bff',
-                                                      color: '#007bff',
-                                                      backgroundColor: 'transparent',
-                                                      transition: 'all 0.2s ease'
-                                                    }}
-                                                    onMouseEnter={(e) => {
-                                                      e.target.style.backgroundColor = '#007bff';
-                                                      e.target.style.color = 'white';
-                                                    }}
-                                                    onMouseLeave={(e) => {
-                                                      e.target.style.backgroundColor = 'transparent';
-                                                      e.target.style.color = '#007bff';
-                                                    }}
+                                                    title="تعديل"
                                                   >
                                                     <i className="bi bi-pencil"></i>
                                                   </button>
                                                   <button
-                                                    type="button"
                                                     className="btn btn-outline-danger"
+                                                    type="button"
                                                     onClick={(e) => {
                                                       e.preventDefault();
                                                       e.stopPropagation();
-                                                      removeProductItem(index);
+                                                      handleItemDeleteClick(item, index);
                                                     }}
                                                     title="حذف"
-                                                    style={{ 
-                                                      width: '27px', 
-                                                      height: '27px', 
-                                                      padding: '0',
-                                                      borderRadius: '6px',
-                                                      fontSize: '14px',
-                                                      display: 'flex',
-                                                      alignItems: 'center',
-                                                      justifyContent: 'center',
-                                                      border: '1px solid #dc3545',
-                                                      color: '#dc3545',
-                                                      backgroundColor: 'transparent',
-                                                      transition: 'all 0.2s ease'
-                                                    }}
-                                                    onMouseEnter={(e) => {
-                                                      e.target.style.backgroundColor = '#dc3545';
-                                                      e.target.style.color = 'white';
-                                                    }}
-                                                    onMouseLeave={(e) => {
-                                                      e.target.style.backgroundColor = 'transparent';
-                                                      e.target.style.color = '#dc3545';
-                                                    }}
+                                                    disabled={deleting}
                                                   >
                                                     <i className="bi bi-trash"></i>
                                                   </button>
@@ -1716,7 +1772,13 @@ function ManufacturedProductsContent() {
                                               </td>
                                             </tr>
                                           );
-                                        })}
+                                        }) : (
+                                          <tr>
+                                            <td colSpan="6" className="text-center py-4 text-muted">
+                                              لا توجد بنود في المنتج
+                                            </td>
+                                          </tr>
+                                        )}
                                       </tbody>
                                       <tfoot className="table-light">
                                         <tr>
@@ -1730,13 +1792,10 @@ function ManufacturedProductsContent() {
                                     </table>
                                   </div>
                                 </div>
-                              </div>
                             </div>
-                          )}
-
+                          </div>
                         </div>
 
-                        {/* Bottom buttons - EXACT SAME as AddTender */}
                         <div className="row">
                           <div className="col-12 d-flex justify-content-center gap-3 mt-4">
                             <button 
@@ -1785,375 +1844,391 @@ function ManufacturedProductsContent() {
                             </button>
                           </div>
                         </div>
-
                       </form>
                     )}
                   </div>
                 </div>
               </div>
             </div>
-          </div>
-          
-          {/* Activity Timeline - Same positioning as AddTender */}
-          {isTimelineVisible && (
-            <div style={{
-              position: 'fixed',
-              left: '20px',
-              top: '70px',
-              width: '350px',
-              height: 'calc(100vh - 90px)',
-              zIndex: 10,
-              background: 'white',
-              borderRadius: '8px',
-              boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-              display: 'flex',
-              flexDirection: 'column'
-            }}>
-              <div style={{ flex: 1, overflow: 'hidden' }}>
-                <SimpleActivityTimeline />
-              </div>
-              <div style={{ 
-                borderTop: '1px solid #e9ecef', 
-                padding: '10px',
-                background: '#f8f9fa',
-                borderRadius: '0 0 8px 8px'
+            
+            {/* Activity Timeline - Same positioning as AddTender */}
+            {isTimelineVisible && (
+              <div style={{
+                position: 'fixed',
+                left: '20px',
+                top: '70px',
+                width: '350px',
+                height: 'calc(100vh - 90px)',
+                zIndex: 10,
+                background: 'white',
+                borderRadius: '8px',
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+                display: 'flex',
+                flexDirection: 'column'
               }}>
-                <ManualActivityCreator />
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <SimpleActivityTimeline />
+                </div>
+                <div style={{ 
+                  borderTop: '1px solid #e9ecef', 
+                  padding: '10px',
+                  background: '#f8f9fa',
+                  borderRadius: '0 0 8px 8px'
+                }}>
+                  <ManualActivityCreator />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Edit Quantity Modal - EXACT CLONE from AddTender */}
+        {showEditModal && editingItem && (
+          <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1050 }}>
+            <div className="modal-dialog modal-xl modal-dialog-centered">
+              <div className="modal-content" style={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
+                <div className="modal-header bg-primary text-white" style={{ borderRadius: '12px 12px 0 0' }}>
+                  <h5 className="modal-title fw-bold">
+                    <i className="bi bi-calculator me-2"></i>
+                    تحديد الكميات والأسعار
+                  </h5>
+                  <button 
+                    type="button" 
+                    className="btn-close btn-close-white" 
+                    onClick={handleCloseEditModal}
+                    aria-label="Close"
+                  ></button>
+                </div>
+                
+                <div className="modal-body p-0" style={{ maxHeight: '50vh', overflowY: 'auto' }}>
+                  <div className="table-responsive">
+                    <table className="table table-hover mb-0">
+                      <thead className="table-light">
+                        <tr>
+                          <th className="text-center" style={{ width: '30%' }}>البند</th>
+                          <th className="text-center" style={{ width: '15%' }}>السعر الأساسي</th>
+                          <th className="text-center" style={{ width: '20%' }}>الكمية</th>
+                          <th className="text-center" style={{ width: '15%' }}>المورد</th>
+                          <th className="text-center" style={{ width: '20%' }}>إجمالي السعر</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr key={editingItem.internalId} style={{ height: '60px' }}>
+                          <td className="text-center">
+                            <div className="d-flex align-items-center justify-content-center">
+                              <i className="bi bi-layers text-danger me-2"></i>
+                              <div>
+                                <div className="fw-bold text-primary">
+                                  {editingItem.materialName || editingItem.name}
+                                </div>
+                                <small className="text-muted">{editingItem.materialCategory || editingItem.category}</small>
+                              </div>
+                            </div>
+                          </td>
+                          
+                          <td className="text-center">
+                            <span className="fw-bold text-success">
+                              {Math.round(editingItem.unitPrice)} ريال
+                            </span>
+                            <div>
+                              <small className="text-muted">/{editingItem.materialUnit || editingItem.unit || 'وحدة'}</small>
+                            </div>
+                          </td>
+                          
+                          <td className="text-center">
+                            <div className="d-flex align-items-center justify-content-center">
+                              <button 
+                                type="button" 
+                                className="btn btn-outline-secondary btn-sm"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleQuantityChange(editingItem.internalId, Math.max(0, Number((editingItem.quantity - 0.1).toFixed(1))));
+                                }}
+                                disabled={editingItem.quantity <= 0}
+                                style={{ width: '32px', height: '32px', borderRadius: '6px' }}
+                              >
+                                <i className="bi bi-dash"></i>
+                              </button>
+                              <input
+                                type="number"
+                                className="form-control text-center mx-2"
+                                style={{ width: '80px', height: '32px', borderRadius: '6px' }}
+                                value={editingItem.quantity}
+                                min="0"
+                                step="any"
+                                onChange={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleQuantityChange(editingItem.internalId, e.target.value);
+                                }}
+                                onBlur={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  // Format to 1 decimal place when user finishes editing
+                                  const formattedValue = Number(e.target.value || 0).toFixed(1);
+                                  handleQuantityChange(editingItem.internalId, formattedValue);
+                                }}
+                              />
+                              <button 
+                                type="button" 
+                                className="btn btn-outline-secondary btn-sm"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleQuantityChange(editingItem.internalId, Number((editingItem.quantity + 0.1).toFixed(1)));
+                                }}
+                                style={{ width: '32px', height: '32px', borderRadius: '6px' }}
+                              >
+                                <i className="bi bi-plus"></i>
+                              </button>
+                            </div>
+                          </td>
+                          
+                          <td className="text-center">
+                            <span className="text-muted">{editingItem.displaySupplier || editingItem.supplierInfo || '-'}</span>
+                          </td>
+                          
+                          <td className="text-center">
+                            <div className="fw-bold text-primary fs-6">
+                              {Math.round(editingItem.totalPrice)} ريال
+                            </div>
+                            <small className="text-success">
+                              ({editingItem.quantity.toFixed(1)} × {Math.round(editingItem.unitPrice)})
+                            </small>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="modal-footer bg-light" style={{ borderRadius: '0 0 12px 12px' }}>
+                  <div className="w-100 d-flex justify-content-between align-items-center">
+                    <div className="d-flex align-items-center">
+                      <span className="text-muted me-3">إجمالي البند:</span>
+                      <span className="fs-4 fw-bold text-primary">
+                        {getTotalEditPrice()} ريال
+                      </span>
+                      <span className="badge bg-info ms-2">
+                        {editingItem.quantity.toFixed(1)} قطعة
+                      </span>
+                    </div>
+                    <div className="d-flex gap-2">
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary"
+                        onClick={handleCloseEditModal}
+                        style={{ 
+                          height: '32px', 
+                          width: '80px', 
+                          borderRadius: '6px', 
+                          fontSize: '14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        إلغاء
+                      </button>
+                      <button 
+                        type="button" 
+                        className="btn btn-primary"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleConfirmEdit();
+                        }}
+                        style={{ 
+                          height: '32px', 
+                          width: '80px', 
+                          borderRadius: '6px', 
+                          fontSize: '14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        تأكيد
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          )}
-        </div>
-      </div>
-      
-      {/* Item Selection Modal - EXACT SAME as AddTender */}
-      <ItemSelectionModal 
-        show={showItemModal}
-        onClose={() => setShowItemModal(false)}
-        onItemSelect={handleItemSelect}
-        selectedItemType={selectedItemType}
-        setSelectedItemType={setSelectedItemType}
-      />
+          </div>
+        )}
 
-      {/* Documents Modal - EXACT SAME as AddTender */}
-      <TenderDocumentModal
-        show={showDocumentsModal}
-        onClose={() => setShowDocumentsModal(false)}
-        documents={documents}
-        setDocuments={setDocuments}
-        tenderId={id || 'new'}
-        tenderTitle={formData.title || 'منتج جديد'}
-        uploadingDocument={uploadingDocument}
-        setUploadingDocument={setUploadingDocument}
-        handleDocumentUpload={handleDocumentUpload}
-        handleDeleteClick={handleDeleteClick}
-        deleting={deleting}
-      />
+        <CustomAlert
+          show={alertConfig.show}
+          onClose={closeAlert}
+          title={alertConfig.title}
+          message={alertConfig.message}
+          type={alertConfig.type}
+          onConfirm={alertConfig.onConfirm}
+          confirmText={alertConfig.confirmText}
+          cancelText={alertConfig.cancelText}
+          showCancel={alertConfig.showCancel}
+        />
 
-      {/* Custom Alert - EXACT SAME as AddTender */}
-      <CustomAlert
-        show={alertConfig.show}
-        onClose={closeAlert}
-        title={alertConfig.title}
-        message={alertConfig.message}
-        type={alertConfig.type}
-        onConfirm={alertConfig.onConfirm}
-        confirmText={alertConfig.confirmText}
-        cancelText={alertConfig.cancelText}
-        showCancel={alertConfig.showCancel}
-      />
+        {/* Add Item Modal */}
+        <ItemSelectionModal
+          show={showItemModal}
+          onClose={handleCloseItemModal}
+          onItemSelect={handleItemTypeSelection}
+          selectedItemType={selectedItemType}
+          setSelectedItemType={setSelectedItemType}
+        />
 
-      {/* File Name Input Modal - EXACT SAME as AddTender */}
-      {showFileNameModal && (
-        <div className="modal show d-block" 
-             style={{ backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 1060 }} 
-             tabIndex="-1" 
-             dir="rtl">
-          <div className="modal-dialog modal-dialog-centered">
-            <div className="modal-content" 
-                 style={{ 
-                   borderRadius: '12px', 
-                   border: 'none', 
-                   boxShadow: '0 10px 30px rgba(0,0,0,0.3)' 
-                 }}>
-              
-              {/* Enhanced Header */}
-              <div className="modal-header text-white" 
+        <TenderDocumentModal
+          show={showDocumentsModal}
+          onClose={() => setShowDocumentsModal(false)}
+          documents={documents}
+          setDocuments={setDocuments}
+          tenderId={id || 'new'}
+          tenderTitle={formData.title || 'منتج جديد'}
+          uploadingDocument={uploadingDocument}
+          setUploadingDocument={setUploadingDocument}
+          handleDocumentUpload={handleDocumentUpload}
+          handleDeleteClick={handleDocumentDeleteClick}
+          deleting={deleting}
+        />
+
+        {/* File Name Input Modal */}
+        {showFileNameModal && (
+          <div className="modal show d-block" 
+               style={{ backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 1060 }} 
+               tabIndex="-1" 
+               dir="rtl">
+            <div className="modal-dialog modal-dialog-centered">
+              <div className="modal-content" 
                    style={{ 
-                     background: 'linear-gradient(135deg, #28a745 0%, #20c997 100%)',
-                     borderRadius: '12px 12px 0 0' 
+                     borderRadius: '12px', 
+                     border: 'none', 
+                     boxShadow: '0 10px 30px rgba(0,0,0,0.3)' 
                    }}>
-                <h5 className="modal-title fw-bold">
-                  <i className="bi bi-pencil-square me-2"></i>
-                  تسمية الملف
-                </h5>
-              </div>
-              
-              {/* Modal Body */}
-              <div className="modal-body" style={{ padding: '25px' }}>
-                <div className="mb-4">
-                  <div className="d-flex align-items-center mb-3">
-                    <div className="bg-success bg-opacity-10 p-2 rounded-circle me-3">
-                      <i className="bi bi-file-earmark-check text-success"></i>
+                
+                {/* Enhanced Header */}
+                <div className="modal-header text-white" 
+                     style={{ 
+                       background: 'linear-gradient(135deg, #28a745 0%, #20c997 100%)',
+                       borderRadius: '12px 12px 0 0' 
+                     }}>
+                  <h5 className="modal-title fw-bold">
+                    <i className="bi bi-pencil-square me-2"></i>
+                    تسمية الملف
+                  </h5>
+                </div>
+                
+                {/* Modal Body */}
+                <div className="modal-body" style={{ padding: '25px' }}>
+                  <div className="mb-4">
+                    <div className="d-flex align-items-center mb-3">
+                      <div className="bg-success bg-opacity-10 p-2 rounded-circle me-3">
+                        <i className="bi bi-file-earmark-check text-success"></i>
+                      </div>
+                      <div>
+                        <h6 className="mb-0 fw-bold text-success">تم رفع الملف بنجاح</h6>
+                        <small className="text-muted">
+                          {pendingFileData?.originalFileName}
+                        </small>
+                      </div>
                     </div>
-                    <div>
-                      <h6 className="mb-0 fw-bold text-success">تم رفع الملف بنجاح</h6>
+                    
+                    <div className="mb-3">
+                      <label className="form-label fw-bold text-primary">
+                        <i className="bi bi-tag me-1"></i>
+                        اسم الملف المخصص *
+                      </label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={customFileName}
+                        onChange={(e) => setCustomFileName(e.target.value)}
+                        placeholder="أدخل اسم الملف المخصص"
+                        style={{
+                          borderRadius: '8px',
+                          border: '2px solid #e9ecef',
+                          padding: '12px 16px',
+                          fontSize: '14px'
+                        }}
+                        onFocus={(e) => {
+                          e.target.style.borderColor = '#28a745';
+                          e.target.style.boxShadow = '0 0 0 0.2rem rgba(40, 167, 69, 0.25)';
+                        }}
+                        onBlur={(e) => {
+                          e.target.style.borderColor = '#e9ecef';
+                          e.target.style.boxShadow = 'none';
+                        }}
+                        autoFocus
+                      />
                       <small className="text-muted">
-                        {pendingFileData?.originalFileName}
+                        <i className="bi bi-info-circle me-1"></i>
+                        سيتم استخدام هذا الاسم لعرض الملف في قائمة الوثائق
                       </small>
                     </div>
                   </div>
-                  
-                  <div className="mb-3">
-                    <label className="form-label fw-bold text-primary">
-                      <i className="bi bi-tag me-1"></i>
-                      اسم الملف المخصص *
-                    </label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={customFileName}
-                      onChange={(e) => setCustomFileName(e.target.value)}
-                      placeholder="أدخل اسم الملف المخصص"
-                      style={{
-                        borderRadius: '8px',
-                        border: '2px solid #e9ecef',
-                        padding: '12px 16px',
-                        fontSize: '14px'
-                      }}
-                      onFocus={(e) => {
-                        e.target.style.borderColor = '#28a745';
-                        e.target.style.boxShadow = '0 0 0 0.2rem rgba(40, 167, 69, 0.25)';
-                      }}
-                      onBlur={(e) => {
-                        e.target.style.borderColor = '#e9ecef';
-                        e.target.style.boxShadow = 'none';
-                      }}
-                      autoFocus
-                    />
-                    <small className="text-muted">
-                      <i className="bi bi-info-circle me-1"></i>
-                      سيتم استخدام هذا الاسم لعرض الملف في قائمة الوثائق
-                    </small>
-                  </div>
                 </div>
-              </div>
-              
-              {/* Enhanced Footer */}
-              <div className="modal-footer bg-light" style={{ borderRadius: '0 0 12px 12px', padding: '20px' }}>
-                <div className="d-flex justify-content-end" style={{ gap: '12px' }}>
-                  <button 
-                    type="button" 
-                    className="btn btn-secondary"
-                    onClick={handleFileNameCancel}
-                    style={{ 
-                      height: '38px', 
-                      width: '90px', 
-                      borderRadius: '8px', 
-                      fontSize: '14px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      textAlign: 'center',
-                      fontWeight: '500'
-                    }}
-                  >
-                    إلغاء
-                  </button>
-                  <button 
-                    type="button" 
-                    className="btn btn-success"
-                    onClick={handleFileNameSave}
-                    disabled={!customFileName.trim() || uploadingDocument}
-                    style={{ 
-                      height: '38px', 
-                      width: '90px', 
-                      borderRadius: '8px', 
-                      fontSize: '14px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      textAlign: 'center',
-                      fontWeight: '500',
-                      opacity: customFileName.trim() && !uploadingDocument ? 1 : 0.6
-                    }}
-                  >
-                    {uploadingDocument ? (
-                      <>
-                        <ModernSpinner size="small" />
-                        <span className="ms-1">حفظ...</span>
-                      </>
-                    ) : (
-                      <>
-                        <i className="bi bi-check-lg me-1"></i>
-                        حفظ
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Item Modal - EXACT SAME as original quantity modal */}
-      {showEditModal && editingItem && (
-        <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1050 }}>
-          <div className="modal-dialog modal-xl modal-dialog-centered">
-            <div className="modal-content" style={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
-              <div className="modal-header bg-primary text-white" style={{ borderRadius: '12px 12px 0 0' }}>
-                <h5 className="modal-title fw-bold">
-                  <i className="bi bi-calculator me-2"></i>
-                  تعديل كمية البند
-                </h5>
-                <button 
-                  type="button" 
-                  className="btn-close btn-close-white" 
-                  onClick={handleCloseEditModal}
-                  aria-label="Close"
-                ></button>
-              </div>
-              
-              <div className="modal-body p-0" style={{ maxHeight: '50vh', overflowY: 'auto' }}>
-                <div className="table-responsive">
-                  <table className="table table-hover mb-0">
-                    <thead className="table-light">
-                      <tr>
-                        <th className="text-center" style={{ width: '30%' }}>اسم المادة</th>
-                        <th className="text-center" style={{ width: '15%' }}>السعر الأساسي</th>
-                        <th className="text-center" style={{ width: '20%' }}>الكمية</th>
-                        <th className="text-center" style={{ width: '15%' }}>المورد</th>
-                        <th className="text-center" style={{ width: '20%' }}>إجمالي السعر</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr style={{ height: '60px' }}>
-                        <td className="text-center">
-                          <div className="d-flex align-items-center justify-content-center">
-                            <i className="bi bi-layers text-danger me-2"></i>
-                            <div>
-                              <div className="fw-bold text-primary">
-                                {editingItem.materialName || editingItem.name || 'مادة غير محددة'}
-                              </div>
-                              <small className="text-muted">{editingItem.materialCategory || editingItem.category || ''}</small>
-                            </div>
-                          </div>
-                        </td>
-                        
-                        <td className="text-center">
-                          <span className="fw-bold text-success">
-                            {Math.round(editingItem.unitPrice || 0)} ريال
-                          </span>
-                          <div>
-                            <small className="text-muted">/{editingItem.materialUnit || editingItem.unit || 'وحدة'}</small>
-                          </div>
-                        </td>
-                        
-                        <td className="text-center">
-                          <div className="d-flex align-items-center justify-content-center">
-                            <button 
-                              type="button" 
-                              className="btn btn-outline-secondary btn-sm"
-                              onClick={() => handleEditQuantityChange(Math.max(0, Number((editingItem.quantity - 0.1).toFixed(1))))}
-                              disabled={editingItem.quantity <= 0}
-                              style={{ width: '32px', height: '32px', borderRadius: '6px' }}
-                            >
-                              <i className="bi bi-dash"></i>
-                            </button>
-                            <input
-                              type="number"
-                              className="form-control text-center mx-2"
-                              style={{ width: '80px', height: '32px', borderRadius: '6px' }}
-                              value={editingItem.quantity || 0}
-                              min="0"
-                              step="any"
-                              onChange={(e) => handleEditQuantityChange(e.target.value)}
-                              onBlur={(e) => {
-                                // Format to 1 decimal place when user finishes editing
-                                const formattedValue = Number(e.target.value || 0).toFixed(1);
-                                handleEditQuantityChange(formattedValue);
-                              }}
-                            />
-                            <button 
-                              type="button" 
-                              className="btn btn-outline-secondary btn-sm"
-                              onClick={() => handleEditQuantityChange(Number((editingItem.quantity + 0.1).toFixed(1)))}
-                              style={{ width: '32px', height: '32px', borderRadius: '6px' }}
-                            >
-                              <i className="bi bi-plus"></i>
-                            </button>
-                          </div>
-                        </td>
-                        
-                        <td className="text-center">
-                          <span className="text-muted">{editingItem.displaySupplier || editingItem.supplier || '-'}</span>
-                        </td>
-                        
-                        <td className="text-center">
-                          <div className="fw-bold text-primary fs-6">
-                            {Math.round(editingItem.totalPrice || 0)} ريال
-                          </div>
-                          <small className="text-success">
-                            ({(editingItem.quantity || 0.1).toFixed(1)} × {Math.round(editingItem.unitPrice || 0)})
-                          </small>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div className="modal-footer bg-light" style={{ borderRadius: '0 0 12px 12px' }}>
-                <div className="w-100 d-flex justify-content-between align-items-center">
-                  <div className="d-flex align-items-center">
-                    <span className="text-muted me-3">إجمالي البند:</span>
-                    <span className="fs-4 fw-bold text-primary">
-                      {Math.round(editingItem.totalPrice || 0)} ريال
-                    </span>
-                    <span className="badge bg-info ms-2">
-                      {(editingItem.quantity || 0.1).toFixed(1)} {editingItem.materialUnit || editingItem.unit || 'قطعة'}
-                    </span>
-                  </div>
-                  <div className="d-flex gap-2">
+                
+                {/* Enhanced Footer */}
+                <div className="modal-footer bg-light" style={{ borderRadius: '0 0 12px 12px', padding: '20px' }}>
+                  <div className="d-flex justify-content-end" style={{ gap: '12px' }}>
                     <button 
                       type="button" 
                       className="btn btn-secondary"
-                      onClick={handleCloseEditModal}
+                      onClick={handleFileNameCancel}
                       style={{ 
-                        height: '32px', 
-                        width: '80px', 
-                        borderRadius: '6px', 
+                        height: '38px', 
+                        width: '90px', 
+                        borderRadius: '8px', 
                         fontSize: '14px',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center'
+                        justifyContent: 'center',
+                        textAlign: 'center',
+                        fontWeight: '500'
                       }}
                     >
                       إلغاء
                     </button>
                     <button 
                       type="button" 
-                      className="btn btn-primary"
-                      onClick={handleSaveEditedItem}
+                      className="btn btn-success"
+                      onClick={handleFileNameSave}
+                      disabled={!customFileName.trim() || uploadingDocument}
                       style={{ 
-                        height: '32px', 
-                        width: '80px', 
-                        borderRadius: '6px', 
+                        height: '38px', 
+                        width: '90px', 
+                        borderRadius: '8px', 
                         fontSize: '14px',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center'
+                        justifyContent: 'center',
+                        textAlign: 'center',
+                        fontWeight: '500',
+                        opacity: customFileName.trim() && !uploadingDocument ? 1 : 0.6
                       }}
                     >
-                      تأكيد
+                      {uploadingDocument ? (
+                        <>
+                          <ModernSpinner size="small" />
+                          <span className="ms-1">حفظ...</span>
+                        </>
+                      ) : (
+                        <>
+                          <i className="bi bi-check-lg me-1"></i>
+                          حفظ
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+      </div>
 
     </>
   );

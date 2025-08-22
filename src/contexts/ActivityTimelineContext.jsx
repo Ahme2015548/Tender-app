@@ -30,22 +30,10 @@ export const ActivityTimelineProvider = ({ children }) => {
         console.log('✅ Activity timeline visibility loaded from Firestore:', visible);
         
       } catch (firestoreError) {
-        // 🧠 SENIOR REACT: Graceful degradation with localStorage fallback
-        console.warn('⚠️ Firestore initialization failed, using fallback strategies:', firestoreError.message);
-        
-        try {
-          // Fallback to localStorage
-          const savedState = localStorage.getItem('activityTimelineVisible');
-          const visible = savedState === 'true';
-          setIsTimelineVisible(visible);
-          console.log('📝 Fallback: Timeline state loaded from localStorage:', visible);
-          
-        } catch (localStorageError) {
-          // 🧠 SENIOR REACT: Ultimate fallback to default state
-          console.warn('⚠️ localStorage fallback failed, using defaults:', localStorageError.message);
-          setIsTimelineVisible(false); // Safe default
-          console.log('🛡️ Using default timeline state: false');
-        }
+        // 🧠 SENIOR REACT: Graceful degradation with default state
+        console.warn('⚠️ Firestore initialization failed, using default state:', firestoreError.message);
+        setIsTimelineVisible(false); // Safe default
+        console.log('🛡️ Using default timeline state: false');
       } finally {
         setLoading(false);
         console.log('✅ Timeline initialization completed');
@@ -66,14 +54,7 @@ export const ActivityTimelineProvider = ({ children }) => {
           // 🧠 SENIOR REACT: Graceful degradation - don't crash the app for settings sync failures
           console.warn('⚠️ Failed to save timeline state to Firestore (non-critical):', error.message);
           
-          // Fallback to localStorage for offline persistence
-          try {
-            localStorage.setItem('activityTimelineVisible', isTimelineVisible.toString());
-            console.log('📝 Fallback: Timeline state saved to localStorage');
-          } catch (localError) {
-            console.warn('⚠️ localStorage fallback also failed:', localError.message);
-            // App continues to work, just without settings persistence
-          }
+          // App continues to work, just without settings persistence
         }
       }
     };
@@ -96,14 +77,6 @@ export const ActivityTimelineProvider = ({ children }) => {
     } catch (error) {
       // 🧠 SENIOR REACT: Non-blocking error handling - don't rollback for settings failures
       console.warn('⚠️ Failed to save timeline toggle to Firestore (non-critical):', error.message);
-      
-      // Fallback to localStorage
-      try {
-        localStorage.setItem('activityTimelineVisible', newState.toString());
-        console.log('📝 Fallback: Timeline toggle saved to localStorage');
-      } catch (localError) {
-        console.warn('⚠️ localStorage fallback failed:', localError.message);
-      }
       
       // Don't rollback - keep the UI state change for better UX
       // User sees immediate response even if sync fails

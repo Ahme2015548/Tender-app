@@ -26,89 +26,12 @@ function ManufacturedRawMaterialsContent() {
   const [filteredRawMaterials, setFilteredRawMaterials] = useState([]);
   const [showQuantityModal, setShowQuantityModal] = useState(false);
   const [modalItems, setModalItems] = useState([]);
+  const [duplicateWarning, setDuplicateWarning] = useState(null); // For inline modal warnings
 
   const navigate = useNavigate();
   const { productId } = useParams();
   const { logActivity, getCurrentUser } = useActivity();
   const { alertConfig, closeAlert, showSuccess, showError } = useCustomAlert();
-  
-  // REAL duplicate prevention - check against existing product items
-  const preventDuplicates = async (items, options = {}) => {
-    try {
-      console.log('🔍 DUPLICATE CHECK: Checking', items.length, 'items against existing product items');
-      
-      // Get existing product items from pending data
-      const existingItems = await FirestorePendingDataService.getPendingProductItems() || [];
-      console.log('🔍 DUPLICATE CHECK: Found', existingItems.length, 'existing items');
-      
-      if (existingItems.length === 0) {
-        console.log('✅ DUPLICATE CHECK: No existing items, all items are unique');
-        return {
-          success: true,
-          uniqueItems: items || []
-        };
-      }
-      
-      // Check for duplicates
-      const duplicates = [];
-      const uniqueItems = [];
-      
-      for (const newItem of items) {
-        const newItemId = newItem.materialInternalId || newItem.internalId || newItem.id;
-        const newItemName = (newItem.materialName || newItem.name || '').trim().toLowerCase();
-        
-        // Check if this item already exists
-        const isDuplicate = existingItems.some(existingItem => {
-          const existingId = existingItem.materialInternalId || existingItem.internalId || existingItem.id;
-          const existingName = (existingItem.materialName || existingItem.name || '').trim().toLowerCase();
-          
-          return (newItemId && existingId && newItemId === existingId) || 
-                 (newItemName && existingName && newItemName === existingName);
-        });
-        
-        if (isDuplicate) {
-          duplicates.push(newItem);
-          console.log('🚨 DUPLICATE FOUND:', newItem.materialName || newItem.name);
-        } else {
-          uniqueItems.push(newItem);
-          console.log('✅ UNIQUE ITEM:', newItem.materialName || newItem.name);
-        }
-      }
-      
-      if (duplicates.length > 0 && options.showError) {
-        const duplicateNames = duplicates.map(item => item.materialName || item.name).join('، ');
-        options.showError(
-          `تم العثور على ${duplicates.length} بند مكرر: ${duplicateNames}. لن يتم إضافة البنود المكررة.`,
-          options.errorTitle || 'بنود مكررة'
-        );
-        
-        if (options.stopOnDuplicates && uniqueItems.length === 0) {
-          return {
-            success: false,
-            uniqueItems: []
-          };
-        }
-      }
-      
-      console.log('🔍 DUPLICATE CHECK RESULT:', {
-        totalItems: items.length,
-        duplicates: duplicates.length,
-        uniqueItems: uniqueItems.length
-      });
-      
-      return {
-        success: true,
-        uniqueItems: uniqueItems
-      };
-      
-    } catch (error) {
-      console.error('❌ Error in duplicate prevention:', error);
-      return {
-        success: true,
-        uniqueItems: items || [] // Fallback: allow all items if check fails
-      };
-    }
-  };
 
   const handleToggle = () => {
     setSidebarCollapsed(!sidebarCollapsed);
@@ -120,6 +43,7 @@ function ManufacturedRawMaterialsContent() {
     // Listen for storage events to sync data changes from other pages
     const handleStorageChange = (e) => {
       // Firestore real-time listeners handle data sync automatically
+      // Keeping event listener for custom events only
       if (e.type === 'rawMaterialsUpdated') {
         loadRawMaterials();
       }
@@ -191,14 +115,14 @@ function ManufacturedRawMaterialsContent() {
     }
   };
 
-  const handleAddSelectedMaterials = () => {
+  const handleAddSelectedMaterials = async () => {
     if (selectedMaterials.length === 0) {
       showError('يرجى اختيار مادة خام واحدة على الأقل', 'لا توجد مواد مختارة');
       return;
     }
 
     // Prepare items with default quantity and calculate prices
-    // Duplicate prevention is now handled by the service layer
+    // Duplicate prevention will be handled in the quantity modal confirmation step
     const itemsWithQuantity = selectedMaterials.map(item => {
       // Get price from quotes or material price
       let displayPrice = item.price || 0;
@@ -224,6 +148,7 @@ function ManufacturedRawMaterialsContent() {
     });
 
     setModalItems(itemsWithQuantity);
+    setDuplicateWarning(null); // Clear any previous warnings
     setShowQuantityModal(true);
   };
 
@@ -238,86 +163,190 @@ function ManufacturedRawMaterialsContent() {
   };
 
   const handleConfirmQuantities = async () => {
+    console.log('🚀 FUNCTION START: handleConfirmQuantities called');
+    
     try {
       if (!Array.isArray(modalItems) || modalItems.length === 0) {
+        console.log('🚨 EARLY EXIT: No modal items to process');
         showError('لا توجد مواد مختارة للإضافة', 'خطأ في البيانات');
         return;
       }
 
-      console.log('🛡️ SENIOR REACT: Using advanced duplicate prevention hook...');
+      console.log('🔍 STEP 1: Starting duplicate check process...');
+      console.log('🔍 Modal items to check:', modalItems.map(item => ({
+        name: item.name,
+        internalId: item.internalId,
+        id: item.id
+      })));
       
-      // Use Senior React Hook for comprehensive duplicate prevention
-      const duplicateCheckResult = await preventDuplicates(modalItems, {
-        showError,
-        errorTitle: 'بنود مكررة',
-        stopOnDuplicates: true
+      // 🔧 FIX: Check for duplicates in BOTH pending items AND existing product items (for edit mode)
+      let existingItemsForDuplicateCheck = await FirestorePendingDataService.getPendingProductItems() || [];
+      
+      // If we're in edit mode (productId exists), also get existing items from the product document
+      if (productId && productId !== 'new') {
+        try {
+          console.log('🎯 EDIT MODE: Loading existing product items for duplicate check, product ID:', productId);
+          const { ManufacturedProductService } = await import('../services/ManufacturedProductService');
+          const product = await ManufacturedProductService.getManufacturedProductById(productId);
+          
+          if (product && product.items && Array.isArray(product.items)) {
+            console.log('📦 EDIT MODE: Found existing product items:', product.items.length);
+            // Merge existing product items with any pending items
+            existingItemsForDuplicateCheck = [...existingItemsForDuplicateCheck, ...product.items];
+          }
+        } catch (error) {
+          console.error('❌ Error loading existing product items for duplicate check:', error);
+        }
+      }
+      
+      console.log('🔍 STEP 2: Retrieved existing items from storage:', {
+        count: existingItemsForDuplicateCheck.length,
+        items: existingItemsForDuplicateCheck.map(item => ({
+          name: item.materialName || item.name,
+          materialInternalId: item.materialInternalId,
+          internalId: item.internalId,
+          id: item.id
+        }))
       });
-
-      console.log('🛡️ SENIOR REACT: Duplicate check result:', duplicateCheckResult);
-
-      // Stop execution if duplicates found
-      if (!duplicateCheckResult.success) {
-        console.log('🚨 SENIOR REACT: Execution stopped due to duplicates');
-        return; // Stop execution completely
+      
+      // 🛡️ FIXED: Use multiple ID strategies to catch all duplicates
+      const existingMaterialIds = existingItemsForDuplicateCheck.map(item => 
+        item.materialInternalId || item.internalId || item.id
+      ).filter(Boolean);
+      console.log('🔍 STEP 3: Extracted existing material IDs:', existingMaterialIds);
+      
+      // 🚨 FIRST: Check for duplicates WITHOUT creating any arrays yet
+      const duplicateItems = [];
+      
+      for (const item of modalItems) {
+        // 🛡️ FIXED: Check ALL possible ID fields to ensure we catch duplicates
+        const possibleIds = [
+          item.internalId,
+          item.id,
+          item.materialInternalId,
+          item.materialId
+        ].filter(Boolean);
+        
+        // Check if ANY of the possible IDs match existing items
+        const isDuplicate = possibleIds.some(id => existingMaterialIds.includes(id));
+        
+        console.log(`🔍 STEP 4: Duplicate check for "${item.name}":`);
+        console.log(`  - Possible IDs: [${possibleIds.join(', ')}]`);
+        console.log(`  - Existing IDs: [${existingMaterialIds.join(', ')}]`);
+        console.log(`  - Is Duplicate: ${isDuplicate}`);
+        
+        if (isDuplicate) {
+          duplicateItems.push(item.name);
+          console.log(`🚨 DUPLICATE FOUND: "${item.name}" with IDs [${possibleIds.join(', ')}] matches existing items!`);
+        }
       }
 
-      // Use only unique items for creation
-      const uniqueModalItems = duplicateCheckResult.uniqueItems;
-      console.log('✅ SENIOR REACT: Proceeding with unique items:', uniqueModalItems.length);
+      console.log('🔍 STEP 5: Duplicate prevention analysis complete:', {
+        totalModalItems: modalItems.length,
+        duplicatesFound: duplicateItems.length,
+        duplicateNames: duplicateItems,
+        existingIds: existingMaterialIds
+      });
 
-      console.log('No duplicates found, proceeding with item creation...');
+      // 🚨 CRITICAL PREVENTION POINT: FORCE STOP IF DUPLICATES FOUND
+      if (duplicateItems.length > 0) {
+        console.log('🚨🚨🚨 CRITICAL: DUPLICATE PREVENTION ACTIVATED 🚨🚨🚨');
+        console.log('🚨 STEP 6: Execution will be FORCEFULLY STOPPED');
+        console.log('🚨 Duplicate items blocking execution:', duplicateItems);
+        console.log('🚨 Function will return immediately after showing warnings');
+        
+        const duplicateNames = duplicateItems.join('، ');
+        
+        // 🚨 SHOW WARNING MESSAGES
+        showError(
+          `⚠️ البنود التالية موجودة مسبقاً في قائمة المنتج المصنع:\n\n${duplicateNames}\n\n❌ لا يمكن إضافة نفس البند مرتين.\n\n✅ يرجى إلغاء تحديد البنود المكررة والمحاولة مرة أخرى.`,
+          '🛡️ تحذير: منع التكرار'
+        );
+        
+        setDuplicateWarning(`⚠️ البنود المكررة: ${duplicateNames}`);
+        
+        console.log('🚨 STEP 7: About to return and stop execution completely');
+        console.log('🚨 If you see any code execution after this point, there is a bug!');
+        
+        // 🚨 ABSOLUTE STOP: This should prevent any further execution
+        return;
+      }
+
+      console.log('✅ STEP 8: NO DUPLICATES DETECTED - Safe to proceed');
+      console.log('✅ Continuing with item creation process...');
       
-      // SENIOR REACT: Create tender items directly - proven method from ForeignProductTender fix
+      // 🎯 NOW SAFE: Create uniqueModalItems since no duplicates were found
+      const uniqueModalItems = modalItems;
+      
+      // Create product items directly with all required fields (EXACT CLONE from RawMaterialTender)
       const productItems = [];
       
       for (const item of uniqueModalItems) {
         try {
-          console.log('🔧 SENIOR REACT: Creating tender item directly for:', item.name);
-          
-          // Create tender item directly with all required fields - no complex service calls
-          const tenderItem = {
-            internalId: `ti_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          // Create product item directly with all required fields
+          const productItem = {
+            internalId: `pi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
             materialInternalId: item.internalId,
             materialType: 'rawMaterial',
             materialName: item.name,
             materialCategory: item.category || '',
             materialUnit: item.unit || 'قطعة',
             quantity: item.quantity || 1,
-            unitPrice: item.unitPrice || 0,
-            totalPrice: (item.quantity || 1) * (item.unitPrice || 0),
-            supplierInfo: item.displaySupplier || '',
-            tenderId: productId === 'new' ? 'new' : productId,
+            unitPrice: item.unitPrice || item.price || 0,
+            totalPrice: (item.quantity || 1) * (item.unitPrice || item.price || 0),
+            supplierInfo: item.displaySupplier || item.supplier || '',
+            productId: productId === 'new' ? 'new' : productId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
           };
           
-          productItems.push(tenderItem);
+          productItems.push(productItem);
           
-          console.log('✅ SENIOR REACT: Created tender item directly:', {
-            id: tenderItem.internalId,
-            materialId: tenderItem.materialInternalId,
-            name: tenderItem.materialName,
-            quantity: tenderItem.quantity,
-            unitPrice: tenderItem.unitPrice,
-            totalPrice: tenderItem.totalPrice
+          console.log('Created product item with ID relationship:', {
+            productItemId: productItem.internalId,
+            linkedMaterialId: productItem.materialInternalId,
+            materialName: productItem.materialName,
+            currentPrice: productItem.unitPrice,
+            totalPrice: productItem.totalPrice
           });
           
         } catch (itemError) {
-          console.error('Error creating manufactured product item for material:', item.name, itemError);
+          console.error('Error creating product item for material:', item.name, itemError);
           showError(`فشل في إضافة المادة: ${item.name}`, 'خطأ في البيانات');
           return;
         }
       }
       
-      // SENIOR REACT: Simple storage merge - same pattern as RawMaterialTender
-      const existingItemsStorage = await FirestorePendingDataService.getPendingProductItems() || [];
-      const allItems = [...existingItemsStorage, ...productItems];
+      // Get existing items and merge with new items (duplicates already filtered out)
+      const existingItems = await FirestorePendingDataService.getPendingProductItems() || [];
+      let allItems = [...productItems]; // Start with new items
       
-      console.log('📦 SENIOR REACT: Merging manufactured product items:', {
-        existingCount: existingItemsStorage.length,
-        newCount: productItems.length,
-        totalCount: allItems.length,
-        items: productItems.map(item => ({
+      if (existingItems.length > 0) {
+        try {
+          if (Array.isArray(existingItems)) {
+            // Refresh pricing for existing items before merging
+            const refreshedExistingItems = await TenderItemsServiceNew.refreshTenderItemsPricing(existingItems);
+            
+            // ✅ SAFE MERGE: Duplicates already prevented above, no need for additional filtering
+            console.log('🔄 SAFE MERGE: Our enhanced duplicate prevention handled conflicts, merging safely');
+            allItems = [...refreshedExistingItems, ...productItems];
+            
+            console.log('✅ SAFE MERGE completed:', {
+              existingItemsCount: refreshedExistingItems.length,
+              newItemsCount: productItems.length,
+              finalItemsCount: allItems.length,
+              note: 'No conflicts - duplicates were prevented above'
+            });
+          }
+        } catch (error) {
+          console.error('Error parsing existing items:', error);
+        }
+      }
+      
+      console.log('Storing ID-based product items:', {
+        totalItems: allItems.length,
+        newItems: productItems.length,
+        items: allItems.map(item => ({
           id: item.internalId,
           materialId: item.materialInternalId,
           name: item.materialName,
@@ -326,48 +355,48 @@ function ManufacturedRawMaterialsContent() {
         }))
       });
       
-      // Use setPendingProductItems with merged items - same pattern as tender
       await FirestorePendingDataService.setPendingProductItems(allItems);
-
-      // SENIOR REACT: Dispatch custom event to notify Manufacturing Products page
-      console.log('🚀 SENIOR REACT: Dispatching product items added event');
-      window.dispatchEvent(new CustomEvent('productItemsAdded', {
-        detail: {
-          source: 'ManufacturedRawMaterials',
-          itemsCount: productItems.length,
-          items: productItems.map(item => ({
-            id: item.internalId,
-            name: item.materialName,
-            type: item.materialType
-          }))
-        }
-      }));
 
       // Log activity
       try {
         const currentUser = getCurrentUser();
         if (currentUser && currentUser.name) {
-          logActivity('task', `${currentUser.name} أضاف مواد خام للمنتج المصنع`, `تم إضافة ${productItems.length} مادة خام`);
+          logActivity('task', `${currentUser.name} أضاف مواد خام للمنتج المصنع`, `تم إضافة ${productItems.length} مادة خام بنظام الهوية الفريدة`);
         }
       } catch (logError) {
         console.error('Failed to log activity:', logError);
       }
       
+      // Items added - manual confirmation will be shown on ManufacturedProducts page
+      
+      // Dispatch custom event to notify ManufacturedProducts page
+      window.dispatchEvent(new CustomEvent('productItemsAdded', {
+        detail: {
+          count: productItems.length,
+          type: 'rawMaterial',
+          items: productItems
+        }
+      }));
+      
       // Show success message
-      showSuccess(`تم إضافة ${productItems.length} مادة خام للمنتج المصنع بنجاح`, 'تمت الإضافة');
+      showSuccess(
+        `تم إضافة ${productItems.length} مادة خام بنجاح إلى قائمة المنتج المصنع`,
+        'نجحت العملية'
+      );
       
       // Close modal and navigate back to ManufacturedProducts
       setShowQuantityModal(false);
       setModalItems([]);
+      setDuplicateWarning(null);
       
-      // Navigate back to ManufacturedProducts page with a slight delay
+      // Navigate back to ManufacturedProducts page with delay to show success message
       setTimeout(() => {
         if (productId === 'new') {
           navigate('/manufactured-products/add');
         } else {
           navigate(`/manufactured-products/edit/${productId}`);
         }
-      }, 100);
+      }, 2000); // 2 seconds to show success message
       
     } catch (error) {
       console.error('Error in handleConfirmQuantities:', error);
@@ -378,6 +407,7 @@ function ManufacturedRawMaterialsContent() {
   const handleCloseQuantityModal = () => {
     setShowQuantityModal(false);
     setModalItems([]);
+    setDuplicateWarning(null); // Clear warning on modal close
   };
 
   const getTotalModalPrice = () => {
@@ -464,7 +494,7 @@ function ManufacturedRawMaterialsContent() {
                     <div className="row align-items-center justify-content-between">
                       <div className="col-lg-4">
                         <h5 className="mb-0 fw-bold">
-                          <i className="bi bi-layers text-danger me-2"></i>
+                          <i className="bi bi-gear text-danger me-2"></i>
                           قائمة المواد الخام ({filteredRawMaterials.length})
                         </h5>
                       </div>
@@ -493,7 +523,7 @@ function ManufacturedRawMaterialsContent() {
                             </span>
                           </div>
                           <button 
-                            className="btn btn-danger shadow-sm px-4" 
+                            className="btn btn-success shadow-sm px-4" 
                             onClick={handleAddSelectedMaterials}
                             disabled={selectedMaterials.length === 0}
                             style={{
@@ -529,7 +559,7 @@ function ManufacturedRawMaterialsContent() {
                     {filteredRawMaterials.length === 0 ? (
                       <div className="text-center py-5">
                         <div className="text-muted mb-3">
-                          <i className="bi bi-layers fs-1"></i>
+                          <i className="bi bi-gear fs-1"></i>
                         </div>
                         <h5 className="text-muted">لا يوجد مواد خام</h5>
                         <p className="text-muted">
@@ -667,6 +697,26 @@ function ManufacturedRawMaterialsContent() {
               </div>
               
               <div className="modal-body p-0" style={{ maxHeight: '50vh', overflowY: 'auto' }}>
+                {/* 🚨 PERSISTENT DUPLICATE WARNING */}
+                {duplicateWarning && (
+                  <div className="alert alert-warning alert-dismissible m-3 mb-2" role="alert" style={{
+                    background: 'linear-gradient(45deg, #fff3cd, #ffeaa7)',
+                    border: '2px solid #f39c12',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 12px rgba(243, 156, 18, 0.3)'
+                  }}>
+                    <div className="d-flex align-items-center">
+                      <i className="bi bi-exclamation-triangle-fill text-warning me-2" style={{ fontSize: '20px' }}></i>
+                      <div className="flex-grow-1">
+                        <strong>تحذير: بنود مكررة!</strong>
+                        <div className="mt-1 text-dark">{duplicateWarning}</div>
+                        <small className="text-muted">يرجى إلغاء تحديد البنود المكررة قبل المتابعة</small>
+                      </div>
+                    </div>
+                    <button type="button" className="btn-close" aria-label="Close" onClick={() => setDuplicateWarning(null)}></button>
+                  </div>
+                )}
+                
                 <div className="table-responsive">
                   <table className="table table-hover mb-0">
                     <thead className="table-light">
@@ -683,7 +733,7 @@ function ManufacturedRawMaterialsContent() {
                         <tr key={item.id} style={{ height: '60px' }}>
                           <td className="text-center">
                             <div className="d-flex align-items-center justify-content-center">
-                              <i className="bi bi-layers text-danger me-2"></i>
+                              <i className="bi bi-gear text-danger me-2"></i>
                               <div>
                                 <button
                                   className="btn btn-link p-0 fw-bold text-primary"

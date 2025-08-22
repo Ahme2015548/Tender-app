@@ -115,69 +115,14 @@ function LocalProductTenderContent() {
   };
 
   const handleAddSelectedProducts = async () => {
-    if (loading) {
-      console.log('🚫 PREVENTING DUPLICATE CLICK: Operation already in progress');
-      return;
-    }
-    
     if (selectedProducts.length === 0) {
       showError('يرجى اختيار منتج محلي واحد على الأقل', 'لا توجد منتجات مختارة');
       return;
     }
 
-    setLoading(true);
-
-    // Check for duplicates in existing items
-    const existingItemsForDuplicateCheck = await FirestorePendingDataService.getPendingTenderItems() || [];
-    let existingMaterialIds = [];
-    
-    if (existingItemsForDuplicateCheck.length > 0) {
-      try {
-        if (Array.isArray(existingItemsForDuplicateCheck)) {
-          // 🛡️ FIXED: Use multiple ID strategies to catch all duplicates  
-          existingMaterialIds = existingItemsForDuplicateCheck.map(item => 
-            item.materialInternalId || item.internalId || item.id
-          ).filter(Boolean);
-        }
-      } catch (error) {
-        console.error('Error parsing existing items:', error);
-      }
-    }
-
-    // Filter out duplicates from selected products
-    const duplicateItems = [];
-    const uniqueSelectedProducts = selectedProducts.filter(product => {
-      // Check ALL possible ID fields
-      const possibleIds = [
-        product.internalId,
-        product.id,
-        product.materialInternalId,
-        product.materialId
-      ].filter(Boolean);
-      
-      const isDuplicate = possibleIds.some(id => existingMaterialIds.includes(id));
-      if (isDuplicate) {
-        duplicateItems.push(product.name);
-      }
-      return !isDuplicate;
-    });
-
-    // Show warning if duplicates found
-    if (duplicateItems.length > 0) {
-      const duplicateNames = duplicateItems.join('، ');
-      showError(`البنود التالية موجودة مسبقاً في القائمة: ${duplicateNames}`, 'بنود مكررة');
-      
-      // If all selected items are duplicates, return
-      if (uniqueSelectedProducts.length === 0) {
-        return;
-      }
-      
-      // Continue with unique items only
-      console.log(`Found ${duplicateItems.length} duplicate items, proceeding with ${uniqueSelectedProducts.length} unique items`);
-    }
-
-    // Prepare items with default quantity and calculate prices (use unique items only)
-    const itemsWithQuantity = uniqueSelectedProducts.map(item => {
+    // Prepare items with default quantity and calculate prices
+    // Duplicate prevention will be handled in the quantity modal confirmation step
+    const itemsWithQuantity = selectedProducts.map(item => {
       // Get price from quotes or product price
       let displayPrice = item.price || 0;
       let displaySupplier = item.manufacturer;

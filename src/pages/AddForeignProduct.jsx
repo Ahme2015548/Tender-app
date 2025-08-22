@@ -141,8 +141,8 @@ function AddForeignProductContent() {
       setLoadingData(true);
       console.log('Loading foreign product data for ID:', id);
       
-      const foreignProducts = await ForeignProductService.getAllForeignProducts();
-      const foreignProduct = foreignProducts.find(item => item.id === id);
+      // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all products
+      const foreignProduct = await ForeignProductService.getForeignProductById(id);
       
       if (foreignProduct) {
         console.log('Foreign product found:', foreignProduct.name);
@@ -187,7 +187,6 @@ function AddForeignProductContent() {
         }
       } else {
         console.error('Foreign product not found with ID:', id);
-        console.log('Available foreign products:', foreignProducts.map(fp => ({ id: fp.id, name: fp.name })));
         // Don't automatically navigate away - show an error instead
         setErrors({ submit: 'المنتج المستورد غير موجود أو تم حذفه' });
       }

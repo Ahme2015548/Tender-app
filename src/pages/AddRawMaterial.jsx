@@ -159,8 +159,8 @@ function AddRawMaterialContent() {
       setLoadingData(true);
       console.log('Loading raw material data for ID:', id);
       
-      const rawMaterials = await RawMaterialService.getAllRawMaterials();
-      const rawMaterial = rawMaterials.find(item => item.id === id);
+      // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all materials
+      const rawMaterial = await RawMaterialService.getRawMaterialById(id);
       
       if (rawMaterial) {
         console.log('Raw material found:', rawMaterial.name);
@@ -206,7 +206,6 @@ function AddRawMaterialContent() {
         }
       } else {
         console.error('Raw material not found with ID:', id);
-        console.log('Available raw materials:', rawMaterials.map(rm => ({ id: rm.id, name: rm.name })));
         // Don't automatically navigate away - show an error instead
         setErrors({ submit: 'المادة الخام غير موجودة أو تم حذفها' });
       }

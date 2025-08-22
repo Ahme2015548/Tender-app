@@ -152,22 +152,11 @@ function ForeignProductTenderContent() {
       return !isDuplicate;
     });
 
-    // Show warning if duplicates found
-    if (duplicateItems.length > 0) {
-      const duplicateNames = duplicateItems.join('، ');
-      showError(`البنود التالية موجودة مسبقاً في القائمة: ${duplicateNames}`, 'بنود مكررة');
-      
-      // If all selected items are duplicates, return
-      if (uniqueSelectedProducts.length === 0) {
-        return;
-      }
-      
-      // Continue with unique items only
-      console.log(`Found ${duplicateItems.length} duplicate items, proceeding with ${uniqueSelectedProducts.length} unique items`);
-    }
+    // 📝 NOTE: Duplicate checking moved to handleConfirmQuantities for better UX
+    // Users can see what they selected in the modal before getting duplicate warnings
 
-    // Prepare items with default quantity and calculate prices (use unique items only)
-    const itemsWithQuantity = uniqueSelectedProducts.map(item => {
+    // Prepare items with default quantity and calculate prices (show ALL selected items in modal)
+    const itemsWithQuantity = selectedProducts.map(item => {
       // Get price from quotes or product price
       let displayPrice = item.price || 0;
       let displaySupplier = item.supplier;

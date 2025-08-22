@@ -25,6 +25,8 @@ export class FirebaseService {
   constructor(collectionName) {
     this.collectionName = collectionName;
     this.collectionRef = collection(db, collectionName);
+    // In-memory cache instead of localStorage
+    this.memoryCache = [];
   }
 
   /**
@@ -431,7 +433,7 @@ export class FirebaseService {
   updateCache(document) {
     try {
       const cacheKey = this.getCacheKey();
-      const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+      const cached = this.memoryCache || [];
       const index = cached.findIndex(doc => doc.id === document.id);
       
       if (index >= 0) {
@@ -450,7 +452,7 @@ export class FirebaseService {
         });
       }
       
-      localStorage.setItem(cacheKey, JSON.stringify(cached));
+      this.memoryCache = cached;
     } catch (error) {
       console.warn('Cache update failed:', error);
     }
@@ -466,7 +468,7 @@ export class FirebaseService {
         _checksum: this.generateChecksum(doc)
       }));
       
-      localStorage.setItem(cacheKey, JSON.stringify(cachedDocs));
+      this.memoryCache = cachedDocs;
     } catch (error) {
       console.warn('Cache set all failed:', error);
     }
@@ -475,9 +477,9 @@ export class FirebaseService {
   removeFromCache(id) {
     try {
       const cacheKey = this.getCacheKey();
-      const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+      const cached = this.memoryCache || [];
       const filtered = cached.filter(doc => doc.id !== id);
-      localStorage.setItem(cacheKey, JSON.stringify(filtered));
+      this.memoryCache = filtered;
     } catch (error) {
       console.warn('Cache remove failed:', error);
     }
@@ -485,9 +487,7 @@ export class FirebaseService {
 
   getFromCache() {
     try {
-      const cacheKey = this.getCacheKey();
-      const cached = localStorage.getItem(cacheKey);
-      return cached ? JSON.parse(cached) : [];
+      return this.memoryCache || [];
     } catch (error) {
       console.warn('Cache read failed:', error);
       return [];

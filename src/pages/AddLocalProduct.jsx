@@ -93,10 +93,16 @@ function AddLocalProductContent() {
   };
 
   useEffect(() => {
-    if (isEditing) {
+    console.log('🔄 AddLocalProduct useEffect triggered:', { id, isEditing });
+    
+    // Load suppliers regardless of mode
+    loadSuppliers();
+    
+    // Load product data only in edit mode
+    if (isEditing && id) {
+      console.log('📋 Loading local product data for edit mode...');
       loadLocalProductData();
     }
-    loadSuppliers();
     
     // Add window focus listener to refresh data when user returns to tab
     const handleFocus = () => {
@@ -112,7 +118,7 @@ function AddLocalProductContent() {
     return () => {
       window.removeEventListener('focus', handleFocus);
     };
-  }, [id]);
+  }, [id, isEditing]);
   
   // Debug: Monitor priceQuoteData changes
   useEffect(() => {
@@ -142,8 +148,8 @@ function AddLocalProductContent() {
       setLoadingData(true);
       console.log('Loading local product data for ID:', id);
       
-      const localProducts = await LocalProductService.getAllLocalProducts();
-      const localProduct = localProducts.find(item => item.id === id);
+      // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all products
+      const localProduct = await LocalProductService.getLocalProductById(id);
       
       if (localProduct) {
         console.log('Local product found:', localProduct.name);
@@ -178,7 +184,6 @@ function AddLocalProductContent() {
         }
       } else {
         console.error('Local product not found with ID:', id);
-        console.log('Available local products:', localProducts.map(lp => ({ id: lp.id, name: lp.name })));
         setErrors({ submit: 'المنتج المحلي غير موجود أو تم حذفه' });
       }
     } catch (error) {

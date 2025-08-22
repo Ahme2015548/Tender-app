@@ -17,7 +17,7 @@ import { RawMaterialService } from './rawMaterialService.js';
 import { LocalProductService } from './localProductService.js';
 import { ForeignProductService } from './foreignProductService.js';
 import { ManufacturedProductService } from './ManufacturedProductService.js';
-import { sessionDataService } from './SessionDataService.js';
+import { FirestorePendingDataService } from './FirestorePendingDataService.js';
 
 const TENDER_ITEMS_COLLECTION = 'tenderItems';
 
@@ -34,9 +34,9 @@ export class TenderItemsService {
     try {
       let existingItems;
       if (storageKey === 'pendingTenderItems') {
-        existingItems = await sessionDataService.getPendingTenderItems() || [];
+        existingItems = await FirestorePendingDataService.getPendingTenderItems() || [];
       } else {
-        existingItems = await sessionDataService.getSessionData(storageKey) || [];
+        existingItems = await FirestorePendingDataService.getPendingData(storageKey) || [];
       }
       return existingItems.some(item => item.materialInternalId === materialInternalId);
     } catch (error) {
@@ -50,9 +50,9 @@ export class TenderItemsService {
     try {
       let existingItems;
       if (storageKey === 'pendingTenderItems') {
-        existingItems = await sessionDataService.getPendingTenderItems() || [];
+        existingItems = await FirestorePendingDataService.getPendingTenderItems() || [];
       } else {
-        existingItems = await sessionDataService.getSessionData(storageKey) || [];
+        existingItems = await FirestorePendingDataService.getPendingData(storageKey) || [];
       }
       
       const isDuplicate = existingItems.some(existingItem => 
@@ -66,9 +66,9 @@ export class TenderItemsService {
       existingItems.push(item);
       
       if (storageKey === 'pendingTenderItems') {
-        await sessionDataService.setPendingTenderItems(existingItems);
+        await FirestorePendingDataService.setPendingTenderItems(existingItems);
       } else {
-        await sessionDataService.setSessionData(storageKey, existingItems);
+        await FirestorePendingDataService.setPendingData(storageKey, existingItems);
       }
       
       console.log(`📦 Item added to ${storageKey}:`, item.materialName);
@@ -274,9 +274,9 @@ export class TenderItemsService {
         updatedAt: new Date()
       };
       
-      const existingItems = await sessionDataService.getPendingTenderItems() || [];
+      const existingItems = await FirestorePendingDataService.getPendingTenderItems() || [];
       existingItems.push(sessionItem);
-      await sessionDataService.setPendingTenderItems(existingItems);
+      await FirestorePendingDataService.setPendingTenderItems(existingItems);
       console.log('📦 Tender item backed up to SessionDataService');
       
       triggerDataSync();
@@ -298,9 +298,9 @@ export class TenderItemsService {
           isLocal: true
         };
         
-        const existingItems = await sessionDataService.getPendingTenderItems() || [];
+        const existingItems = await FirestorePendingDataService.getPendingTenderItems() || [];
         existingItems.push(fallbackItem);
-        await sessionDataService.setPendingTenderItems(existingItems);
+        await FirestorePendingDataService.setPendingTenderItems(existingItems);
         console.log('📦 Tender item saved to sessionDataService as fallback');
         return fallbackId;
       } catch (fallbackError) {
