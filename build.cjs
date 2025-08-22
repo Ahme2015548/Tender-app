@@ -10,19 +10,14 @@
   const viteChunksPath = 'node_modules/vite/dist/node/chunks';
   const viteNodePath = 'node_modules/vite/dist/node';
   
-  console.log("🔍 Checking Vite installation integrity...");
-  
-  // Check if this is Vercel
+  // Check if this is Vercel - use Webpack immediately if on Vercel
   const isVercel = process.env.VERCEL || process.env.VERCEL_ENV;
-  const chunksExist = fs.existsSync(viteChunksPath);
   
-  if (isVercel && !chunksExist) {
-    console.log("🚨 Vercel environment with missing Vite chunks detected!");
-    console.log("📦 Switching to alternative build method...");
+  if (isVercel) {
+    console.log("🚨 Vercel environment detected - using Webpack build to avoid Vite chunks issue!");
     
-    // Skip Vite entirely on Vercel when chunks are missing
     try {
-      console.log("🔧 Building with alternative method (Webpack + Babel)...");
+      console.log("🔧 Building with Webpack + Babel (bypassing Vite completely)...");
       
       // Install webpack and babel for alternative build
       execSync('npm install --no-save webpack webpack-cli babel-loader @babel/core @babel/preset-react @babel/preset-env css-loader style-loader sass-loader html-webpack-plugin copy-webpack-plugin', { stdio: 'inherit', timeout: 120000 });
@@ -85,14 +80,22 @@ module.exports = {
       // Run webpack build
       execSync('npx webpack --config webpack.config.js', { stdio: 'inherit', timeout: 300000 });
       
-      console.log("✅ Alternative build completed successfully!");
+      console.log("✅ Webpack build completed successfully!");
       process.exit(0);
       
-    } catch (altErr) {
-      console.log("❌ Alternative build failed:", altErr?.message);
+    } catch (webpackErr) {
+      console.log("❌ Webpack build failed:", webpackErr?.message);
+      // Continue to try Vite methods as last resort
     }
-  } else if (chunksExist || !isVercel) {
-    console.log("✅ Vite chunks directory exists or not on Vercel");
+  }
+  
+  console.log("🔍 Checking Vite installation integrity...");
+  const chunksExist = fs.existsSync(viteChunksPath);
+  
+  if (chunksExist) {
+    console.log("✅ Vite chunks directory exists");
+  } else {
+    console.log("⚠️ Vite chunks directory missing");
   }
   
   // Method 1: Direct Vite command first
