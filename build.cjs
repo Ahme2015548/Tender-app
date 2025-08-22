@@ -12,28 +12,87 @@
   
   console.log("🔍 Checking Vite installation integrity...");
   
-  // Always try to repair if on Vercel or if chunks are missing
+  // Check if this is Vercel
   const isVercel = process.env.VERCEL || process.env.VERCEL_ENV;
   const chunksExist = fs.existsSync(viteChunksPath);
   
-  if (!chunksExist || isVercel) {
-    console.log("🔧 Proactively reinstalling Vite for Vercel compatibility...");
+  if (isVercel && !chunksExist) {
+    console.log("🚨 Vercel environment with missing Vite chunks detected!");
+    console.log("📦 Switching to alternative build method...");
+    
+    // Skip Vite entirely on Vercel when chunks are missing
     try {
-      // Force clean reinstall
-      execSync('npm uninstall vite', { stdio: 'inherit' });
-      execSync('npm cache clean --force', { stdio: 'inherit', timeout: 30000 });
-      execSync('npm install vite@5.4.10 --save-dev', { stdio: 'inherit', timeout: 120000 });
+      console.log("🔧 Building with alternative method (Webpack + Babel)...");
       
-      if (fs.existsSync(viteChunksPath)) {
-        console.log("✅ Vite chunks installed successfully!");
-      } else {
-        console.log("⚠️ Chunks still missing after reinstall...");
+      // Install webpack and babel for alternative build
+      execSync('npm install --no-save webpack webpack-cli babel-loader @babel/core @babel/preset-react @babel/preset-env css-loader style-loader sass-loader html-webpack-plugin copy-webpack-plugin', { stdio: 'inherit', timeout: 120000 });
+      
+      // Create webpack config for emergency build
+      const webpackConfig = `
+const path = require('path');
+const HtmlWebpackPlugin = require('html-webpack-plugin');
+const CopyPlugin = require('copy-webpack-plugin');
+
+module.exports = {
+  mode: 'production',
+  entry: './src/main.jsx',
+  output: {
+    path: path.resolve(__dirname, 'dist'),
+    filename: 'assets/index-[contenthash].js',
+    clean: true,
+    publicPath: '/'
+  },
+  resolve: {
+    extensions: ['.js', '.jsx']
+  },
+  module: {
+    rules: [
+      {
+        test: /\\.(js|jsx)$/,
+        exclude: /node_modules/,
+        use: {
+          loader: 'babel-loader',
+          options: {
+            presets: ['@babel/preset-react', '@babel/preset-env']
+          }
+        }
+      },
+      {
+        test: /\\.(css|scss)$/,
+        use: ['style-loader', 'css-loader', 'sass-loader']
+      },
+      {
+        test: /\\.(png|jpg|jpeg|gif|svg|woff|woff2|eot|ttf)$/,
+        type: 'asset/resource'
       }
-    } catch (repairErr) {
-      console.log("⚠️ Vite repair failed:", repairErr?.message);
+    ]
+  },
+  plugins: [
+    new HtmlWebpackPlugin({
+      template: './index.html',
+      inject: true
+    }),
+    new CopyPlugin({
+      patterns: [
+        { from: 'public', to: '.', noErrorOnMissing: true }
+      ]
+    })
+  ]
+};`;
+      
+      fs.writeFileSync('webpack.config.js', webpackConfig);
+      
+      // Run webpack build
+      execSync('npx webpack --config webpack.config.js', { stdio: 'inherit', timeout: 300000 });
+      
+      console.log("✅ Alternative build completed successfully!");
+      process.exit(0);
+      
+    } catch (altErr) {
+      console.log("❌ Alternative build failed:", altErr?.message);
     }
-  } else {
-    console.log("✅ Vite chunks directory exists");
+  } else if (chunksExist || !isVercel) {
+    console.log("✅ Vite chunks directory exists or not on Vercel");
   }
   
   // Method 1: Direct Vite command first
