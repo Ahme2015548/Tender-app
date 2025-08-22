@@ -20,7 +20,9 @@
       console.log("🔧 Building with Webpack + Babel (bypassing Vite completely)...");
       
       // Install webpack and babel for alternative build
-      execSync('npm install --no-save webpack webpack-cli babel-loader @babel/core @babel/preset-react @babel/preset-env css-loader style-loader sass-loader sass html-webpack-plugin copy-webpack-plugin', { stdio: 'inherit', timeout: 120000 });
+      console.log("📦 Installing webpack dependencies...");
+      execSync('npm install --no-save webpack@5 webpack-cli@5 babel-loader@9 @babel/core@7 @babel/preset-react@7 @babel/preset-env@7 css-loader@6 style-loader@3 sass-loader@13 sass@1 html-webpack-plugin@5 copy-webpack-plugin@11', { stdio: 'inherit', timeout: 180000 });
+      console.log("✅ Webpack dependencies installed successfully");
       
       // Create webpack config for emergency build
       const webpackConfig = `const path = require('path');
@@ -84,7 +86,17 @@ module.exports = {
       
     } catch (webpackErr) {
       console.log("❌ Webpack build failed:", webpackErr?.message);
-      // Continue to try Vite methods as last resort
+      
+      // 🧠 SENIOR REACT: On Vercel, if webpack fails, force exit with error
+      // Don't fall through to broken Vite chunks
+      if (isVercel) {
+        console.error("🔥 VERCEL BUILD FAILED: Webpack is the only reliable option on Vercel due to Vite chunks issue");
+        console.error("💡 This is expected - the chunks issue requires webpack fallback");
+        console.error("📋 Error details for debugging:");
+        console.error(webpackErr);
+        process.exit(1);
+      }
+      // Continue to try Vite methods only if NOT on Vercel
     }
   }
   
