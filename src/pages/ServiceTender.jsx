@@ -549,9 +549,23 @@ function ServiceTenderContent() {
                                     </div>
                                   </td>
                                   <td className="text-center">
-                                    <span className="fw-bold text-primary">
+                                    <button
+                                      className="btn btn-link p-0 fw-bold text-primary"
+                                      style={{ 
+                                        textDecoration: 'none', 
+                                        border: 'none', 
+                                        background: 'none', 
+                                        cursor: 'pointer' 
+                                      }}
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        navigate(`/services/edit/${service.id || service.internalId}`);
+                                      }}
+                                      title={`تحرير الخدمة: ${service.name}`}
+                                    >
                                       {service.name}
-                                    </span>
+                                    </button>
                                   </td>
                                   <td className="text-center">{service.type || '-'}</td>
                                   <td className="text-center">خدمة</td>
@@ -670,7 +684,7 @@ function ServiceTenderContent() {
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    navigate(`/services/edit/${item.id}`);
+                                    navigate(`/services/edit/${item.id || item.internalId}`);
                                   }}
                                   title={`تحرير الخدمة: ${item.name}`}
                                 >

@@ -532,7 +532,23 @@ function ServiceManufactureContent() {
                                   </div>
                                 </td>
                                 <td className="text-center">
-                                  <span className="fw-bold text-primary">{service.name}</span>
+                                  <button
+                                    className="btn btn-link p-0 fw-bold text-primary"
+                                    style={{ 
+                                      textDecoration: 'none', 
+                                      border: 'none', 
+                                      background: 'none', 
+                                      cursor: 'pointer' 
+                                    }}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      navigate(`/services/edit/${service.id || service.internalId}`);
+                                    }}
+                                    title={`تحرير الخدمة: ${service.name}`}
+                                  >
+                                    {service.name}
+                                  </button>
                                   {service.description && (
                                     <div className="small text-muted">{service.description}</div>
                                   )}
