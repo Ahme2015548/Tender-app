@@ -23,6 +23,7 @@ import TenderDocumentModal from '../components/TenderDocumentModal';
 import { FirestoreTenderItemsService } from '../services/FirestoreTenderItemsService';
 import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 import { FirestoreDocumentService } from '../services/FirestoreDocumentService';
+import { useNewFirstSorting } from '../hooks/useListSorting';
 
 function AddTenderContent() {
   const navigate = useNavigate();
@@ -59,6 +60,9 @@ function AddTenderContent() {
   const [customFileName, setCustomFileName] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [tenderItems, setTenderItems] = useState([]);
+  
+  // Senior React: Apply new-first sorting to tender items for display
+  const sortedTenderItems = useNewFirstSorting(tenderItems, 'createdAt');
   
   // ✅ ID-based duplicate prevention tracking
   const [selectedItemIds, setSelectedItemIds] = useState([]);
@@ -1029,12 +1033,15 @@ function AddTenderContent() {
       await SimpleTrashService.moveToTrash(itemWithContext, 'tenderItems');
       console.log('✅ Successfully moved to trash');
       
-      // Remove from current list
+      // Remove from current list using item ID instead of index (for sorted display compatibility)
+      const itemId = item?.internalId || item?.materialInternalId || item?.id;
       setTenderItems(prevItems => {
-        const newItems = prevItems.filter((_, idx) => idx !== index);
+        const newItems = prevItems.filter(existingItem => {
+          const existingItemId = existingItem?.internalId || existingItem?.materialInternalId || existingItem?.id;
+          return existingItemId !== itemId;
+        });
         
         // Remove item ID from selectedItemIds for duplicate prevention
-        const itemId = item?.internalId || item?.materialInternalId || item?.id;
         if (itemId) {
           setSelectedItemIds(prev => prev.filter(id => id !== itemId));
         }
@@ -1669,7 +1676,7 @@ function AddTenderContent() {
                                       </tr>
                                     </thead>
                                     <tbody>
-                                      {tenderItems && tenderItems.length > 0 ? tenderItems.map((item, index) => {
+                                      {sortedTenderItems && sortedTenderItems.length > 0 ? sortedTenderItems.map((item, index) => {
                                           // Ensure we're working with proper ID-based structure
                                           // Never show the internal ID as display name
                                           let displayName = item.materialName || item.name || 'مادة غير محددة';
