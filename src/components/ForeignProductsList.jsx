@@ -9,6 +9,7 @@ import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import ModernSpinner from './ModernSpinner';
 import { usePagination } from '../hooks/usePagination';
+import { useNewFirstSorting } from '../hooks/useListSorting';
 import Pagination from './Pagination';
 
 const ForeignProductsList = ({ refreshTrigger }) => {
@@ -17,6 +18,9 @@ const ForeignProductsList = ({ refreshTrigger }) => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredForeignProducts, setFilteredForeignProducts] = useState([]);
+  
+  // Senior React: Apply new-first sorting to foreign products
+  const sortedForeignProducts = useNewFirstSorting(foreignProducts, 'createdAt');
   const [deleting, setDeleting] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showForeignSupplierModal, setShowForeignSupplierModal] = useState(false);
@@ -50,8 +54,9 @@ const ForeignProductsList = ({ refreshTrigger }) => {
   }, [refreshTrigger]);
 
   useEffect(() => {
+    // Senior React: Use sorted foreign products as base for filtering
     if (searchTerm.trim()) {
-      const filtered = foreignProducts.filter(product => 
+      const filtered = sortedForeignProducts.filter(product => 
         product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -59,11 +64,11 @@ const ForeignProductsList = ({ refreshTrigger }) => {
       );
       setFilteredForeignProducts(filtered);
     } else {
-      setFilteredForeignProducts(foreignProducts);
+      setFilteredForeignProducts(sortedForeignProducts);
     }
     // Reset to first page when search changes
     resetPage();
-  }, [searchTerm, foreignProducts, resetPage]);
+  }, [searchTerm, sortedForeignProducts, resetPage]);
 
   const loadForeignProducts = async () => {
     try {

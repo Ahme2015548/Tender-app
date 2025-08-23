@@ -5,6 +5,7 @@ import { useActivity } from './ActivityManager';
 import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import { usePagination } from '../hooks/usePagination';
+import { useNewFirstSorting } from '../hooks/useListSorting';
 import Pagination from './Pagination';
 import ModernSpinner from './ModernSpinner';
 
@@ -14,6 +15,9 @@ const EmployeesList = ({ onEdit, onAdd, onView, refreshTrigger }) => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredEmployees, setFilteredEmployees] = useState([]);
+  
+  // Senior React: Apply new-first sorting to employees
+  const sortedEmployees = useNewFirstSorting(employees, 'createdAt');
   const [deleting, setDeleting] = useState(false);
   const { logActivity, getCurrentUser } = useActivity();
   const { alertConfig, closeAlert, showSuccess, showError, showConfirm } = useCustomAlert();
@@ -41,7 +45,7 @@ const EmployeesList = ({ onEdit, onAdd, onView, refreshTrigger }) => {
 
   useEffect(() => {
     filterEmployees();
-  }, [employees, searchTerm]);
+  }, [sortedEmployees, searchTerm]);
 
   const loadEmployees = async () => {
     try {
@@ -60,7 +64,8 @@ const EmployeesList = ({ onEdit, onAdd, onView, refreshTrigger }) => {
 
 
   const filterEmployees = () => {
-    let filtered = [...employees];
+    // Senior React: Use sorted employees as base for filtering
+    let filtered = [...sortedEmployees];
 
     // Search filter
     if (searchTerm.trim()) {

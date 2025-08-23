@@ -5,6 +5,7 @@ import { useActivity } from './ActivityManager';
 import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import { usePagination } from '../hooks/usePagination';
+import { useNewFirstSorting } from '../hooks/useListSorting';
 import Pagination from './Pagination';
 
 const CustomersList = ({ onEdit, onAdd, refreshTrigger }) => {
@@ -13,6 +14,9 @@ const CustomersList = ({ onEdit, onAdd, refreshTrigger }) => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredCustomers, setFilteredCustomers] = useState([]);
+  
+  // Senior React: Apply new-first sorting to customers
+  const sortedCustomers = useNewFirstSorting(customers, 'createdAt');
   const [deleting, setDeleting] = useState(false);
   const { logActivity, getCurrentUser } = useActivity();
   const { alertConfig, closeAlert, showSuccess, showError, showConfirm, showDeleteConfirm } = useCustomAlert();
@@ -39,19 +43,20 @@ const CustomersList = ({ onEdit, onAdd, refreshTrigger }) => {
   }, [refreshTrigger]);
 
   useEffect(() => {
+    // Senior React: Use sorted customers as base for filtering
     if (searchTerm.trim()) {
-      const filtered = customers.filter(customer => 
+      const filtered = sortedCustomers.filter(customer => 
         customer.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         customer.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         customer.phone?.includes(searchTerm)
       );
       setFilteredCustomers(filtered);
     } else {
-      setFilteredCustomers(customers);
+      setFilteredCustomers(sortedCustomers);
     }
     // Reset to first page when search changes
     resetPage();
-  }, [searchTerm, customers, resetPage]);
+  }, [searchTerm, sortedCustomers, resetPage]);
 
   const loadCustomers = async () => {
     try {

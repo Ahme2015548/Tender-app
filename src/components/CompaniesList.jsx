@@ -5,6 +5,7 @@ import { useActivity } from './ActivityManager';
 import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import { usePagination } from '../hooks/usePagination';
+import { useNewFirstSorting } from '../hooks/useListSorting';
 import Pagination from './Pagination';
 
 const CompaniesList = ({ onEdit, onAdd, refreshTrigger }) => {
@@ -13,6 +14,9 @@ const CompaniesList = ({ onEdit, onAdd, refreshTrigger }) => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredCompanies, setFilteredCompanies] = useState([]);
+  
+  // Senior React: Apply new-first sorting to companies
+  const sortedCompanies = useNewFirstSorting(companies, 'createdAt');
   const [deleting, setDeleting] = useState(false);
   const { logActivity, getCurrentUser } = useActivity();
   const { alertConfig, closeAlert, showSuccess, showError, showConfirm, showDeleteConfirm } = useCustomAlert();
@@ -40,18 +44,19 @@ const CompaniesList = ({ onEdit, onAdd, refreshTrigger }) => {
 
   useEffect(() => {
     if (searchTerm.trim()) {
-      const filtered = companies.filter(company => 
+      // Senior React: Use sorted companies as base for filtering
+      const filtered = sortedCompanies.filter(company => 
         company.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         company.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         company.phone?.includes(searchTerm)
       );
       setFilteredCompanies(filtered);
     } else {
-      setFilteredCompanies(companies);
+      setFilteredCompanies(sortedCompanies);
     }
     // Reset to first page when search changes
     resetPage();
-  }, [searchTerm, companies, resetPage]);
+  }, [searchTerm, sortedCompanies, resetPage]);
 
   const loadCompanies = async () => {
     try {

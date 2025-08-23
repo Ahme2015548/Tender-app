@@ -5,6 +5,7 @@ import { useActivity } from './ActivityManager';
 import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import { usePagination } from '../hooks/usePagination';
+import { useNewFirstSorting } from '../hooks/useListSorting';
 import Pagination from './Pagination';
 
 const SuppliersList = ({ onEdit, onAdd, refreshTrigger }) => {
@@ -13,11 +14,14 @@ const SuppliersList = ({ onEdit, onAdd, refreshTrigger }) => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredSuppliers, setFilteredSuppliers] = useState([]);
+  
+  // Senior React: Apply new-first sorting to suppliers
+  const sortedSuppliers = useNewFirstSorting(suppliers, 'createdAt');
   const [deleting, setDeleting] = useState(false);
   const { logActivity, getCurrentUser } = useActivity();
   const { alertConfig, closeAlert, showSuccess, showError, showConfirm, showDeleteConfirm } = useCustomAlert();
 
-  // Pagination hook
+  // Pagination hook - now uses sorted suppliers as base
   const {
     currentPage,
     totalPages,
@@ -39,19 +43,20 @@ const SuppliersList = ({ onEdit, onAdd, refreshTrigger }) => {
   }, [refreshTrigger]);
 
   useEffect(() => {
+    // Senior React: Use sorted suppliers as base for filtering
     if (searchTerm.trim()) {
-      const filtered = suppliers.filter(supplier => 
+      const filtered = sortedSuppliers.filter(supplier => 
         supplier.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         supplier.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         supplier.phone?.includes(searchTerm)
       );
       setFilteredSuppliers(filtered);
     } else {
-      setFilteredSuppliers(suppliers);
+      setFilteredSuppliers(sortedSuppliers);
     }
     // Reset to first page when search changes
     resetPage();
-  }, [searchTerm, suppliers, resetPage]);
+  }, [searchTerm, sortedSuppliers, resetPage]);
 
   const loadSuppliers = async () => {
     try {

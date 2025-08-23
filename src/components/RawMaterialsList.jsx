@@ -9,6 +9,7 @@ import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import ModernSpinner from './ModernSpinner';
 import { usePagination } from '../hooks/usePagination';
+import { useNewFirstSorting } from '../hooks/useListSorting';
 import Pagination from './Pagination';
 import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 
@@ -18,6 +19,9 @@ const RawMaterialsList = ({ refreshTrigger }) => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredRawMaterials, setFilteredRawMaterials] = useState([]);
+  
+  // Senior React: Apply new-first sorting to raw materials
+  const sortedRawMaterials = useNewFirstSorting(rawMaterials, 'createdAt');
   const [deleting, setDeleting] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showForeignSupplierModal, setShowForeignSupplierModal] = useState(false);
@@ -86,10 +90,11 @@ const RawMaterialsList = ({ refreshTrigger }) => {
   }, [refreshTrigger]);
 
   useEffect(() => {
+    // Senior React: Use sorted raw materials as base for filtering
     if (searchTerm.trim()) {
       console.log('Searching for:', searchTerm);
-      console.log('Total materials before filter:', rawMaterials.length);
-      const filtered = rawMaterials.filter(material => 
+      console.log('Total materials before filter:', sortedRawMaterials.length);
+      const filtered = sortedRawMaterials.filter(material => 
         material.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         material.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         material.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -99,12 +104,12 @@ const RawMaterialsList = ({ refreshTrigger }) => {
       console.log('First filtered material:', filtered[0]);
       setFilteredRawMaterials(filtered);
     } else {
-      console.log('No search term, showing all materials:', rawMaterials.length);
-      setFilteredRawMaterials(rawMaterials);
+      console.log('No search term, showing all materials:', sortedRawMaterials.length);
+      setFilteredRawMaterials(sortedRawMaterials);
     }
     // Reset to first page when search changes
     resetPage();
-  }, [searchTerm, rawMaterials, resetPage]);
+  }, [searchTerm, sortedRawMaterials, resetPage]);
 
   const loadRawMaterials = async () => {
     try {

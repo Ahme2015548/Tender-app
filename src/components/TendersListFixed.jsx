@@ -7,6 +7,7 @@ import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import { usePagination } from '../hooks/usePagination';
 import { useDateFormat } from '../hooks/useDateFormat';
+import { useNewFirstSorting } from '../hooks/useListSorting';
 import Pagination from './Pagination';
 
 // 🚀 SENIOR REACT: Beautiful Countdown Timer Component
@@ -99,6 +100,9 @@ const TendersListFixed = ({ refreshTrigger }) => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredTenders, setFilteredTenders] = useState([]);
+  
+  // Senior React: Apply new-first sorting to tenders
+  const sortedTenders = useNewFirstSorting(tenders, 'createdAt');
   const [deleting, setDeleting] = useState(false);
   const { logActivity, getCurrentUser } = useActivity();
   const { alertConfig, closeAlert, showSuccess, showError, showConfirm } = useCustomAlert();
@@ -169,7 +173,8 @@ const TendersListFixed = ({ refreshTrigger }) => {
 
   useEffect(() => {
     if (searchTerm.trim()) {
-      const filtered = tenders.filter(tender => 
+      // Senior React: Use sorted tenders as base for filtering
+      const filtered = sortedTenders.filter(tender => 
         tender.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         tender.referenceNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         tender.entity?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -177,11 +182,11 @@ const TendersListFixed = ({ refreshTrigger }) => {
       );
       setFilteredTenders(filtered);
     } else {
-      setFilteredTenders(tenders);
+      setFilteredTenders(sortedTenders);
     }
     // Reset to first page when search changes
     resetPage();
-  }, [searchTerm, tenders, resetPage]);
+  }, [searchTerm, sortedTenders, resetPage]);
 
   // SENIOR REACT: Use stored database value directly - no calculations
 

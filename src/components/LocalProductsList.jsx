@@ -9,6 +9,7 @@ import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import ModernSpinner from './ModernSpinner';
 import { usePagination } from '../hooks/usePagination';
+import { useNewFirstSorting } from '../hooks/useListSorting';
 import Pagination from './Pagination';
 
 const LocalProductsList = ({ refreshTrigger }) => {
@@ -17,6 +18,9 @@ const LocalProductsList = ({ refreshTrigger }) => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredLocalProducts, setFilteredLocalProducts] = useState([]);
+  
+  // Senior React: Apply new-first sorting to local products
+  const sortedLocalProducts = useNewFirstSorting(localProducts, 'createdAt');
   const [deleting, setDeleting] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showForeignSupplierModal, setShowForeignSupplierModal] = useState(false);
@@ -50,8 +54,9 @@ const LocalProductsList = ({ refreshTrigger }) => {
   }, [refreshTrigger]);
 
   useEffect(() => {
+    // Senior React: Use sorted local products as base for filtering
     if (searchTerm.trim()) {
-      const filtered = localProducts.filter(product => 
+      const filtered = sortedLocalProducts.filter(product => 
         product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.category?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -59,11 +64,11 @@ const LocalProductsList = ({ refreshTrigger }) => {
       );
       setFilteredLocalProducts(filtered);
     } else {
-      setFilteredLocalProducts(localProducts);
+      setFilteredLocalProducts(sortedLocalProducts);
     }
     // Reset to first page when search changes
     resetPage();
-  }, [searchTerm, localProducts, resetPage]);
+  }, [searchTerm, sortedLocalProducts, resetPage]);
 
   const loadLocalProducts = async () => {
     try {

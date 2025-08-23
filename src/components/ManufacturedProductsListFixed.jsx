@@ -7,6 +7,7 @@ import CustomAlert from './CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import { usePagination } from '../hooks/usePagination';
 import { useDateFormat } from '../hooks/useDateFormat';
+import { useNewFirstSorting } from '../hooks/useListSorting';
 import Pagination from './Pagination';
 import { auth } from '../services/firebase';
 import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
@@ -22,6 +23,9 @@ const ManufacturedProductsListFixed = ({ refreshTrigger }) => {
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredProducts, setFilteredProducts] = useState([]);
+  
+  // Senior React: Apply new-first sorting to manufactured products
+  const sortedProducts = useNewFirstSorting(products, 'createdAt');
   const [deleting, setDeleting] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const { logActivity, getCurrentUser } = useActivity();
@@ -115,18 +119,19 @@ const ManufacturedProductsListFixed = ({ refreshTrigger }) => {
 
   useEffect(() => {
     if (searchTerm.trim()) {
-      const filtered = products.filter(product => 
+      // Senior React: Use sorted products as base for filtering
+      const filtered = sortedProducts.filter(product => 
         product.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.referenceNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         product.description?.toLowerCase().includes(searchTerm.toLowerCase())
       );
       setFilteredProducts(filtered);
     } else {
-      setFilteredProducts(products);
+      setFilteredProducts(sortedProducts);
     }
     // Reset to first page when search changes
     resetPage();
-  }, [searchTerm, products, resetPage]);
+  }, [searchTerm, sortedProducts, resetPage]);
 
   // SENIOR REACT: Use stored database value directly - no calculations
 
