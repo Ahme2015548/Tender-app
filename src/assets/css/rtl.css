@@ -191,20 +191,73 @@ input[type="date"] {
   border-right: var(--bs-border-width) var(--bs-border-style) var(--bs-border-color) !important;
 }
 
+/* Sidebar Treeview Arrow - Base Definition */
+.sidebar-menu > li.treeview::after {
+  content: "\f284"; /* Bootstrap Icons chevron-left */
+  font-family: "bootstrap-icons";
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  color: #666;
+  transition: transform 0.3s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Arrow rotation when menu is open */
+.sidebar-menu > li.treeview.open::after {
+  transform: translateY(-50%) rotate(90deg);
+}
+
 /* Sidebar Treeview Arrow Positioning for RTL */
 [dir="rtl"] .sidebar-menu > li.treeview::after {
   right: auto !important;
   left: 15px !important;
-  transform: rotate(90deg) !important;
+  transform: translateY(-50%) rotate(90deg) !important;
 }
 
-[dir="rtl"] .sidebar-menu > li.treeview.active::after {
-  transform: rotate(0deg) !important;
+[dir="rtl"] .sidebar-menu > li.treeview.active::after,
+[dir="rtl"] .sidebar-menu > li.treeview.open::after {
+  transform: translateY(-50%) rotate(0deg) !important;
 }
 
 /* Hide treeview arrow when sidebar is collapsed */
-[dir="rtl"] .sidebar-menu > li.treeview[data-collapsed="true"]::after {
+[dir="rtl"] .sidebar-menu > li.treeview[data-collapsed="true"]::after,
+.sidebar-wrapper.collapsed .treeview::after,
+.sidebar-menu > li.treeview[data-collapsed="true"]::after {
   display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+/* Ensure arrows stay visible on hover and override any hiding rules - but not when collapsed */
+.sidebar-menu > li.treeview:not([data-collapsed="true"]):hover::after,
+.page-wrapper.pinned .sidebar-wrapper .sidebar-menu li.treeview:not([data-collapsed="true"]):hover::after,
+.page-wrapper.pinned:not(.sidebar-hovered) .sidebar-wrapper .sidebar-menu li.treeview:not([data-collapsed="true"]):hover::after {
+  display: block !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Keep arrows visible when sidebar is expanded (not collapsed) */
+.sidebar-wrapper:not(.collapsed) .sidebar-menu > li.treeview:not([data-collapsed="true"])::after {
+  display: block !important;
+}
+
+/* Override AdminLTE pinned sidebar arrow hiding */
+@media (min-width: 992px) {
+  .page-wrapper.pinned:not(.sidebar-hovered) .sidebar-wrapper .sidebar-menu li.treeview:not([data-collapsed="true"]):after {
+    display: block !important;
+  }
+  
+  /* Force arrows to show on hover even in pinned state - but not when collapsed */
+  .page-wrapper.pinned:not(.sidebar-hovered) .sidebar-wrapper .sidebar-menu li.treeview:not([data-collapsed="true"]):hover:after {
+    display: block !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
 }
 
 /* Breadcrumb separator positioning for RTL */
