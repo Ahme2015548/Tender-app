@@ -1,0 +1,32 @@
+{
+  "name": "tender-timer-server",
+  "version": "1.0.0",
+  "description": "Server-side timer API extension for Tender app",
+  "main": "timer-api.js",
+  "scripts": {
+    "start": "node timer-api.js",
+    "dev": "nodemon timer-api.js",
+    "test": "echo \"Timer API tests coming soon\"",
+    "build": "echo \"No build step required\"",
+    "deploy:railway": "railway up",
+    "deploy:render": "echo \"Deploy via Render dashboard\"",
+    "deploy:vercel": "vercel --prod",
+    "deploy:heroku": "git push heroku main"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "node-cron": "^3.0.2",
+    "firebase-admin": "^11.10.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "keywords": ["timer", "scheduling", "firebase", "react"],
+  "author": "Senior React Engineer",
+  "license": "ISC"
+}

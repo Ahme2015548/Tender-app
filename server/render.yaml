@@ -1,0 +1,15 @@
+# 🌐 CLOUD DEPLOYMENT: Render.com configuration
+services:
+  - type: web
+    name: tender-timer-api
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TZ
+        value: Asia/Riyadh
+      - key: PORT
+        value: 10000
+    healthCheckPath: /health
