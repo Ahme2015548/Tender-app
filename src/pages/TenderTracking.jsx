@@ -1,15 +1,26 @@
-import React, { useState, useMemo, useCallback, memo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useMemo, useCallback, memo, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
-import SidebarButtons from '../components/SidebarButtons';
 import SimpleActivityTimeline from '../components/SimpleActivityTimeline';
 import ManualActivityCreator from '../components/ManualActivityCreator';
 import { ActivityProvider, AutoActivityTracker } from '../components/ActivityManager';
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
 import { useDragAndDrop } from '../hooks/useDragAndDrop';
 import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
+import TenderTrackingService from '../services/TenderTrackingService';
+import ModernSpinner from '../components/ModernSpinner';
+import CustomAlert from '../components/CustomAlert';
+import { useCustomAlert } from '../hooks/useCustomAlert';
 import '../assets/css/kanban.css';
+
+// 🎯 SENIOR REACT: Global number formatting for TenderTracking page - Force 1 decimal place
+Number.prototype.toLocaleStringOneDecimal = function() {
+  return this.toLocaleString('en-US', { 
+    minimumFractionDigits: 1, 
+    maximumFractionDigits: 1 
+  });
+};
 
 // Constants for better maintainability
 const STAGES = {
@@ -21,104 +32,37 @@ const STAGES = {
 
 const STAGE_CONFIG = {
   [STAGES.PENDING]: {
-    title: "قيد الانتظار",
-    icon: "bi-hourglass-split",
+    title: "قيد الدراسة",
+    icon: "bi-search",
     bgColor: "linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%)",
-    progress: 0
+    progress: 25
   },
   [STAGES.IN_PROGRESS]: {
-    title: "قيد التنفيذ",
-    icon: "bi-gear-fill", 
+    title: "تم التقديم",
+    icon: "bi-upload", 
     bgColor: "linear-gradient(135deg, #4834d4 0%, #686de0 100%)",
     progress: 50
   },
   [STAGES.REVIEW]: {
-    title: "قيد المراجعة",
-    icon: "bi-clipboard-check",
+    title: "تم فتح المظاريف",
+    icon: "bi-envelope-open",
     bgColor: "linear-gradient(135deg, #f39c12 0%, #e67e22 100%)",
-    progress: 90
+    progress: 75
   },
   [STAGES.COMPLETED]: {
-    title: "مكتملة", 
-    icon: "bi-check-circle-fill",
+    title: "تم الترسية", 
+    icon: "bi-award",
     bgColor: "linear-gradient(135deg, #27ae60 0%, #2ecc71 100%)",
     progress: 100
   }
 };
 
-// Mock data - in real app this would come from API/store
+// Empty initial kanban data - real data comes from selected tenders
 const INITIAL_KANBAN_DATA = {
-  [STAGES.PENDING]: [
-    {
-      id: 1,
-      title: "مناقصة إنشاء مبنى سكني",
-      client: "شركة العمارة الحديثة", 
-      deadline: "2024-01-15",
-      value: "2,500,000",
-      priority: "high",
-      progress: 0
-    },
-    {
-      id: 2,
-      title: "مناقصة توريد مواد بناء",
-      client: "مؤسسة البناء المتقدم",
-      deadline: "2024-01-20", 
-      value: "850,000",
-      priority: "medium",
-      progress: 0
-    }
-  ],
-  [STAGES.IN_PROGRESS]: [
-    {
-      id: 3,
-      title: "مناقصة تشطيب فيلا",
-      client: "العميل الخاص",
-      deadline: "2024-02-01",
-      value: "1,200,000", 
-      priority: "high",
-      progress: 65
-    },
-    {
-      id: 4,
-      title: "مناقصة صيانة مباني",
-      client: "الهيئة الحكومية",
-      deadline: "2024-01-25",
-      value: "450,000",
-      priority: "low", 
-      progress: 30
-    }
-  ],
-  [STAGES.REVIEW]: [
-    {
-      id: 5,
-      title: "مناقصة مشروع تجاري",
-      client: "مجمع التسوق الكبير",
-      deadline: "2024-02-10",
-      value: "3,800,000",
-      priority: "high",
-      progress: 90
-    }
-  ],
-  [STAGES.COMPLETED]: [
-    {
-      id: 6, 
-      title: "مناقصة ترميم مسجد",
-      client: "وزارة الأوقاف",
-      deadline: "2023-12-30",
-      value: "680,000",
-      priority: "medium",
-      progress: 100
-    },
-    {
-      id: 7,
-      title: "مناقصة بناء مدرسة", 
-      client: "وزارة التربية",
-      deadline: "2023-12-15",
-      value: "1,950,000",
-      priority: "high",
-      progress: 100
-    }
-  ]
+  [STAGES.PENDING]: [],
+  [STAGES.IN_PROGRESS]: [],
+  [STAGES.REVIEW]: [],
+  [STAGES.COMPLETED]: []
 };
 
 // Utility functions
@@ -140,6 +84,19 @@ const getPriorityText = (priority) => {
   }
 };
 
+// Calculate priority based on estimated value
+const calculatePriorityFromValue = (estimatedValue) => {
+  const value = parseFloat(estimatedValue) || 0;
+  
+  if (value > 750000) {
+    return 'high';
+  } else if (value >= 400000) {
+    return 'medium';
+  } else {
+    return 'low';
+  }
+};
+
 const formatCurrency = (amount) => {
   return new Intl.NumberFormat('ar-SA', {
     style: 'currency',
@@ -149,9 +106,134 @@ const formatCurrency = (amount) => {
   }).format(amount);
 };
 
+const formatCurrencyOneDecimal = (amount) => {
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  }).format(amount);
+};
+
+// Helper function to get ALL real-time data from TenderDataSharingService (complete sync with original tender)
+const useRealTimeTenderValues = (tender) => {
+  const [realTimeValues, setRealTimeValues] = useState({
+    // Pricing data
+    estimatedValue: tender.estimatedValue || 0,
+    grandTotal: tender.grandTotal || 0,
+    tax: tender.tax || 0,
+    vat: tender.vat || 0,
+    // ALL tender fields for complete real-time sync
+    title: tender.title || '',
+    entity: tender.entity || '',
+    description: tender.description || '',
+    referenceNumber: tender.referenceNumber || '',
+    submissionDeadline: tender.submissionDeadline || tender.deadline || tender.submissionDate || tender.endDate,
+    category: tender.category || '',
+    location: tender.location || '',
+    contactPerson: tender.contactPerson || '',
+    contactPhone: tender.contactPhone || '',
+    contactEmail: tender.contactEmail || '',
+    lastUpdated: tender.updatedAt || tender.createdAt || new Date()
+  });
+  
+  useEffect(() => {
+    const updateRealTimeValues = async () => {
+      if (!tender.id) return;
+      
+      try {
+        // Use same method as TenderStudy page to get real-time data
+        const { default: TenderDataSharingService } = await import('../services/TenderDataSharingService');
+        const tenderData = await TenderDataSharingService.getTenderWithItems(tender.id, false);
+        
+        if (tenderData && tenderData.tenderData) {
+          const data = tenderData.tenderData;
+          const items = tenderData.tenderItems || [];
+          
+          // Calculate subtotal from items (real-time)
+          const subtotal = items.reduce((sum, item) => sum + (parseFloat(item.totalPrice) || 0), 0);
+          
+          // Use same calculation logic as TenderStudy
+          const baseCost = parseFloat(data.grandTotal || data.estimatedValue || subtotal || 0);
+          const taxAmount = parseFloat(data.tax || 0);
+          const vatAmount = parseFloat(data.vat || 0);
+          const grandTotal = baseCost + taxAmount + vatAmount;
+          
+          console.log(`🔄 COMPLETE REAL-TIME SYNC for ${data.title || tender.title}:`, {
+            subtotal,
+            baseCost,
+            taxAmount,
+            vatAmount,
+            grandTotal,
+            itemsCount: items.length,
+            title: data.title,
+            entity: data.entity,
+            deadline: data.submissionDeadline
+          });
+          
+          setRealTimeValues({
+            // Pricing data (real-time calculated)
+            estimatedValue: subtotal > 0 ? subtotal : (data.estimatedValue || 0),
+            grandTotal: grandTotal > 0 ? grandTotal : baseCost,
+            tax: taxAmount,
+            vat: vatAmount,
+            // ALL tender fields (complete real-time sync)
+            title: data.title || tender.title || '',
+            entity: data.entity || tender.entity || '',
+            description: data.description || tender.description || '',
+            referenceNumber: data.referenceNumber || tender.referenceNumber || '',
+            submissionDeadline: data.submissionDeadline || data.deadline || data.submissionDate || data.endDate || tender.submissionDeadline,
+            category: data.category || tender.category || '',
+            location: data.location || tender.location || '',
+            contactPerson: data.contactPerson || tender.contactPerson || '',
+            contactPhone: data.contactPhone || tender.contactPhone || '',
+            contactEmail: data.contactEmail || tender.contactEmail || '',
+            lastUpdated: data.updatedAt || data.createdAt || new Date()
+          });
+        }
+      } catch (error) {
+        console.warn('Warning: Could not fetch real-time tender data:', error);
+      }
+    };
+    
+    updateRealTimeValues();
+    
+    // Update every 3 seconds for complete real-time sync
+    const interval = setInterval(updateRealTimeValues, 3000);
+    
+    return () => clearInterval(interval);
+  }, [tender.id, tender.estimatedValue, tender.grandTotal, tender.title, tender.entity, tender.submissionDeadline]);
+  
+  return realTimeValues;
+};
+
 // Memoized Kanban Card Component
-const KanbanCard = memo(({ tender, stage, onDragStart, onDragEnd, isDragging }) => {
-  const cardClassName = `kanban-card ${isDragging ? 'kanban-card--dragging' : ''}`;
+const KanbanCard = memo(({ tender, stage, onDragStart, onDragEnd, isDragging, navigate }) => {
+  // Get real-time values (same as TenderStudy)
+  const realTimeValues = useRealTimeTenderValues(tender);
+  const isSelected = tender.isSelectedTender;
+  const cardClassName = `kanban-card ${isDragging ? 'kanban-card--dragging' : ''} ${isSelected ? 'kanban-card--selected' : ''}`;
+  
+  // Handle card click - for "تحت الدراسة" (pending) and "تم التقديم" (in_progress) stages
+  const handleCardClick = (e) => {
+    // Don't trigger if dragging
+    if (isDragging) return;
+    
+    // Allow click for pending and in_progress stages
+    if (stage === STAGES.PENDING || stage === STAGES.IN_PROGRESS) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Navigate to TenderStudy page with read-only mode for in_progress stage
+      navigate(`/tender-study/${tender.id}`, {
+        state: {
+          tender,
+          fromTracking: true,
+          readOnly: stage === STAGES.IN_PROGRESS // Read-only for "تم التقديم" stage
+        }
+      });
+    }
+  };
+  
+  const isClickable = stage === STAGES.PENDING || stage === STAGES.IN_PROGRESS;
   
   return (
     <div
@@ -159,54 +241,156 @@ const KanbanCard = memo(({ tender, stage, onDragStart, onDragEnd, isDragging }) 
       draggable={true}
       onDragStart={(e) => onDragStart(e, tender, stage)}
       onDragEnd={onDragEnd}
+      onClick={handleCardClick}
       data-testid={`kanban-card-${tender.id}`}
       role="button"
       tabIndex={0}
-      aria-label={`${tender.title} - ${getPriorityText(tender.priority)} priority`}
+      aria-label={`${tender.title} - ${getPriorityText(calculatePriorityFromValue(tender.estimatedValue))} priority`}
+      style={{
+        ...isSelected ? {
+          border: '2px solid #007bff',
+          boxShadow: '0 4px 12px rgba(0,123,255,0.3)',
+          background: 'linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%)',
+          position: 'relative'
+        } : {},
+        cursor: isClickable ? 'pointer' : 'grab',
+        transition: 'all 0.2s ease'
+      }}
     >
+      {/* Selected tender badge */}
+      {isSelected && (
+        <div className="position-absolute top-0 start-0" style={{
+          background: 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)',
+          color: 'white',
+          fontSize: '10px',
+          fontWeight: 'bold',
+          padding: '2px 6px',
+          borderRadius: '0 0 8px 0',
+          zIndex: 10
+        }}>
+          <i className="bi bi-check-circle me-1"></i>
+          محدد
+        </div>
+      )}
       <div className="d-flex justify-content-between align-items-start mb-2">
-        <h6 className="card-title mb-0">{tender.title}</h6>
-        <span 
-          className={`badge priority-badge priority-badge--${tender.priority}`}
-          style={{ backgroundColor: getPriorityColor(tender.priority) }}
-        >
-          {getPriorityText(tender.priority)}
-        </span>
+        <h6 className="card-title mb-0" style={{ fontSize: '14px', fontWeight: 'bold', color: '#333' }}>
+          مناقصة {realTimeValues.entity}
+          {realTimeValues.entity !== tender.entity && (
+            <small className="text-primary ms-1" style={{ fontSize: '10px' }}>
+              <i className="bi bi-arrow-clockwise"></i>
+            </small>
+          )}
+        </h6>
+        {(() => {
+          const calculatedPriority = calculatePriorityFromValue(realTimeValues.estimatedValue);
+          return (
+            <span 
+              className={`badge priority-badge priority-badge--${calculatedPriority}`}
+              style={{ backgroundColor: getPriorityColor(calculatedPriority) }}
+            >
+              {getPriorityText(calculatedPriority)}
+            </span>
+          );
+        })()}
       </div>
       
-      <div className="card-info mb-2">
-        <i className="bi bi-building me-1"></i>
-        {tender.client}
+      <div className="card-info mb-2" style={{ fontSize: '13px', color: '#555', fontWeight: '500' }}>
+        <i className="bi bi-file-text me-1"></i>
+        {realTimeValues.title}
+        {realTimeValues.title !== tender.title && (
+          <small className="text-primary ms-1" style={{ fontSize: '10px' }}>
+            <i className="bi bi-arrow-clockwise"></i>
+          </small>
+        )}
       </div>
       
-      <div className="card-info mb-2">
+      <div className="card-info mb-2" style={{ fontSize: '12px', color: '#666' }}>
         <i className="bi bi-calendar-event me-1"></i>
-        {new Date(tender.deadline).toLocaleDateString('ar-SA')}
+        <span style={{ fontWeight: '500' }}>موعد انتهاء التقديم: </span>
+        {(() => {
+          try {
+            // Use real-time deadline data
+            const deadlineDate = realTimeValues.submissionDeadline;
+            const originalDeadline = tender.submissionDeadline || tender.deadline || tender.submissionDate || tender.endDate;
+            
+            if (!deadlineDate) return 'غير محدد';
+            
+            // Handle Firestore timestamp objects
+            let submissionDeadline = deadlineDate;
+            if (deadlineDate && typeof deadlineDate === 'object' && deadlineDate.seconds) {
+              submissionDeadline = new Date(deadlineDate.seconds * 1000);
+            } else {
+              submissionDeadline = new Date(deadlineDate);
+            }
+            
+            if (isNaN(submissionDeadline.getTime())) return 'غير محدد';
+            
+            // DD/MM/YYYY format
+            const formattedDate = submissionDeadline.toLocaleDateString('en-GB');
+            
+            return (
+              <span>
+                {formattedDate}
+                {realTimeValues.submissionDeadline !== originalDeadline && (
+                  <small className="text-primary ms-1" style={{ fontSize: '10px' }}>
+                    <i className="bi bi-arrow-clockwise"></i>
+                  </small>
+                )}
+              </span>
+            );
+          } catch (error) {
+            return 'غير محدد';
+          }
+        })()}
       </div>
       
-      <div className="card-value mb-3">
-        <i className="bi bi-currency-dollar me-1"></i>
-        {formatCurrency(tender.value)}
+      <div className="card-value mb-2" style={{ fontSize: '13px', color: '#28a745', fontWeight: 'bold' }}>
+        <i className="bi bi-cash me-1"></i>
+        <span>التكلفة التقديرية: </span>
+        {(realTimeValues.estimatedValue || 0).toLocaleStringOneDecimal()} ر.س
+        {realTimeValues.estimatedValue !== (tender.estimatedValue || 0) && (
+          <small className="text-muted ms-2" style={{ fontSize: '10px' }}>
+            <i className="bi bi-arrow-clockwise me-1"></i>
+            محدث
+          </small>
+        )}
       </div>
       
-      {tender.progress > 0 && (
-        <div className="mb-2">
-          <div className="d-flex justify-content-between align-items-center mb-1">
-            <small className="text-muted">التقدم</small>
-            <small className="fw-bold text-primary">{tender.progress}%</small>
-          </div>
-          <div className="progress-custom">
-            <div 
-              className="progress-bar-custom"
-              style={{ width: `${tender.progress}%` }}
-            ></div>
-          </div>
+      {realTimeValues.grandTotal > 0 && (
+        <div className="card-value mb-3" style={{ fontSize: '12px', color: '#007bff', fontWeight: 'bold' }}>
+          <i className="bi bi-receipt me-1"></i>
+          <span>التكلفة شامل الضريبة: </span>
+          {(realTimeValues.grandTotal || 0).toLocaleStringOneDecimal()} ر.س
         </div>
       )}
       
+      {(() => {
+        const stageProgress = STAGE_CONFIG[stage]?.progress || 0;
+        return stageProgress > 0 && (
+          <div className="mb-2">
+            <div className="d-flex justify-content-between align-items-center mb-1">
+              <small className="text-muted">التقدم</small>
+              <small className="fw-bold text-primary">{stageProgress}%</small>
+            </div>
+            <div className="progress-custom">
+              <div 
+                className="progress-bar-custom"
+                style={{ width: `${stageProgress}%` }}
+              ></div>
+            </div>
+          </div>
+        );
+      })()}
+      
       <div className="card-timestamp">
         <i className="bi bi-clock me-1"></i>
-        منذ يومين
+        <span style={{ fontWeight: '500' }}>الحالة: </span>
+        {TenderTrackingService.getStatusText(realTimeValues.submissionDeadline)}
+        {realTimeValues.submissionDeadline !== (tender.submissionDeadline || tender.deadline || tender.submissionDate || tender.endDate) && (
+          <small className="text-primary ms-1" style={{ fontSize: '10px' }}>
+            <i className="bi bi-arrow-clockwise"></i>
+          </small>
+        )}
       </div>
     </div>
   );
@@ -223,7 +407,8 @@ const KanbanColumn = memo(({
   onDrop, 
   onCardDragStart, 
   onCardDragEnd,
-  dragState 
+  dragState,
+  navigate 
 }) => {
   const config = STAGE_CONFIG[stage];
   const count = tenders.length;
@@ -262,6 +447,7 @@ const KanbanColumn = memo(({
               onDragStart={onCardDragStart}
               onDragEnd={onCardDragEnd}
               isDragging={dragState.draggedItem?.id === tender.id}
+              navigate={navigate}
             />
           ))
         ) : (
@@ -281,7 +467,7 @@ const KanbanColumn = memo(({
 KanbanColumn.displayName = 'KanbanColumn';
 
 // Main Kanban Board Component
-const KanbanBoard = memo(({ kanbanData, onMoveCard }) => {
+const KanbanBoard = memo(({ kanbanData, onMoveCard, navigate }) => {
   const {
     dragState,
     handleDragStart,
@@ -323,6 +509,7 @@ const KanbanBoard = memo(({ kanbanData, onMoveCard }) => {
           onCardDragStart={handleDragStart}
           onCardDragEnd={handleDragEnd}
           dragState={dragState}
+          navigate={navigate}
         />
       ))}
     </div>
@@ -335,55 +522,271 @@ KanbanBoard.displayName = 'KanbanBoard';
 function TenderTrackingContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const { isTimelineVisible } = useActivityTimeline();
-  const [kanbanData, setKanbanData] = useState(INITIAL_KANBAN_DATA);
+  const location = useLocation();
   const navigate = useNavigate();
+  const { alertConfig, closeAlert, showSuccess, showError, showConfirm } = useCustomAlert();
+  
+  // 🚀 SENIOR FIREBASE: State management
+  const [kanbanData, setKanbanData] = useState(INITIAL_KANBAN_DATA);
+  const [loading, setLoading] = useState(true);
+  const [initializing, setInitializing] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // Get selected tender from navigation state
+  const selectedTender = location.state?.selectedTender;
+
+  // 🚀 SENIOR FIREBASE: Load tracked tenders on mount and cleanup duplicates
+  useEffect(() => {
+    initializeTrackingPage();
+  }, []);
+
+  const initializeTrackingPage = async () => {
+    try {
+      console.log('🔥 [TRACKING-PAGE] Initializing tracking page');
+      
+      // 🧹 CLEANUP: Remove any duplicate entries first
+      await TenderTrackingService.removeDuplicateTrackingEntries();
+      
+      // Load clean data
+      loadTrackedTenders();
+      
+    } catch (error) {
+      console.error('❌ [TRACKING-PAGE] Error initializing tracking page:', error);
+      // Continue loading even if cleanup fails
+      loadTrackedTenders();
+    }
+  };
+
+  // 🚀 SENIOR FIREBASE: Real-time listener for tracked tenders
+  useEffect(() => {
+    console.log('🔥 [TRACKING-PAGE] Setting up real-time listener');
+    
+    const unsubscribe = TenderTrackingService.subscribeToTrackedTenders((data, error) => {
+      if (error) {
+        console.error('❌ [TRACKING-PAGE] Real-time error:', error);
+        showError('فشل في تحميل البيانات في الوقت الفعلي', 'خطأ في الاتصال');
+        return;
+      }
+      
+      if (data) {
+        console.log('🔄 [TRACKING-PAGE] Real-time update received');
+        
+        // 🔧 FIX: Clear isSelectedTender flag for all tenders to prevent first card always being selected
+        const cleanedData = {};
+        Object.keys(data).forEach(stage => {
+          cleanedData[stage] = data[stage].map(tender => ({
+            ...tender,
+            isSelectedTender: false
+          }));
+        });
+        
+        setKanbanData(cleanedData);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      console.log('🔥 [TRACKING-PAGE] Cleaning up real-time listener');
+      unsubscribe();
+    };
+  }, []);
+
+  // 🚀 SENIOR FIREBASE: Initialize selected tender tracking
+  useEffect(() => {
+    if (selectedTender && !initializing) {
+      initializeSelectedTender();
+    }
+  }, [selectedTender]);
+
+  const loadTrackedTenders = async () => {
+    try {
+      console.log('🔥 [TRACKING-PAGE] Loading tracked tenders');
+      setLoading(true);
+      
+      const data = await TenderTrackingService.getAllTrackedTenders();
+      
+      // 🔧 FIX: Clear isSelectedTender flag for all tenders to prevent first card always being selected
+      const cleanedData = {};
+      Object.keys(data).forEach(stage => {
+        cleanedData[stage] = data[stage].map(tender => ({
+          ...tender,
+          isSelectedTender: false
+        }));
+      });
+      
+      setKanbanData(cleanedData);
+      
+      console.log('✅ [TRACKING-PAGE] Tracked tenders loaded successfully');
+    } catch (error) {
+      console.error('❌ [TRACKING-PAGE] Error loading tracked tenders:', error);
+      showError(error.message || 'فشل في تحميل المناقصات المتتبعة', 'خطأ في التحميل');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const initializeSelectedTender = async () => {
+    try {
+      console.log('🔥 [TRACKING-PAGE] Initializing selected tender for tracking');
+      setInitializing(true);
+
+      // Show confirmation dialog
+      showConfirm(
+        `هل تريد إضافة هذه المناقصة للتتبع؟\n\nجهة المناقصة: ${selectedTender.entity}\nعنوان المناقصة: ${selectedTender.title}`,
+        async () => {
+          try {
+            const trackingData = await TenderTrackingService.initializeTenderTracking(selectedTender);
+            
+            showSuccess('تم إضافة المناقصة للتتبع بنجاح', 'تم الحفظ');
+            console.log('✅ [TRACKING-PAGE] Tender tracking initialized:', trackingData.id);
+            
+            // Clear navigation state to prevent re-initialization
+            window.history.replaceState({}, document.title);
+            
+            // 🔄 REFRESH: Trigger TenderSelection page refresh if needed
+            localStorage.setItem('tenderTrackingUpdated', Date.now().toString());
+            
+          } catch (error) {
+            console.error('❌ [TRACKING-PAGE] Error initializing tender tracking:', error);
+            showError(error.message || 'فشل في إضافة المناقصة للتتبع', 'خطأ');
+          }
+        },
+        'تأكيد إضافة للتتبع'
+      );
+    } catch (error) {
+      console.error('❌ [TRACKING-PAGE] Error in initializeSelectedTender:', error);
+    } finally {
+      setInitializing(false);
+    }
+  };
 
   const handleToggle = useCallback(() => {
     setSidebarCollapsed(prev => !prev);
   }, []);
 
-  const handleAddTender = async () => {
+  const handleAddTender = () => {
+    // Navigate to tender selection page instead of add tender page
+    console.log('🎯 [TRACKING] Navigating to tender selection page');
+    navigate('/tenders/selection');
+  };
+
+  const handleReturnToList = async (e) => {
+    e.preventDefault();
+    
     try {
-      // Clear all pending data to start completely fresh
-      await FirestorePendingDataService.clearPendingData('tenderFormData_new');
-      await FirestorePendingDataService.clearPendingData('tenderDocuments_new'); 
-      await FirestorePendingDataService.clearPendingTenderItems();
+      // Get the drag data from the drag event
+      const dragData = e.dataTransfer.getData('text/plain');
+      const parsedData = JSON.parse(dragData);
       
-      console.log('✅ [TRACKING] All pending data cleared - navigating to fresh Add Tender form');
+      if (!parsedData || !parsedData.item || !parsedData.item.id) {
+        showError('البيانات غير صحيحة', 'خطأ في السحب');
+        return;
+      }
+
+      const cardData = parsedData.item;
+      console.log('🔄 [TRACKING] Returning card to selection list:', cardData.title);
       
-      // Navigate to add tender page
-      navigate('/tenders/add');
+      // Show confirmation dialog
+      showConfirm(
+        `هل تريد إعادة "${cardData.title}" إلى قائمة المناقصات المتاحة؟\nسيتم إزالتها من التتبع.`,
+        async () => {
+          try {
+            // Completely remove from tracking system so it appears in selection list again
+            await TenderTrackingService.removeTenderFromTracking(cardData.id);
+            
+            // Update local state by removing from current stage
+            setKanbanData(prevData => {
+              const newData = { ...prevData };
+              Object.keys(newData).forEach(stage => {
+                newData[stage] = newData[stage].filter(tender => tender.id !== cardData.id);
+              });
+              return newData;
+            });
+            
+            // Reset drag styles
+            const returnButton = document.getElementById('return-to-list-zone');
+            if (returnButton) {
+              returnButton.style.backgroundColor = 'rgba(220, 53, 69, 0.1)';
+              returnButton.style.borderColor = '#dc3545';
+              returnButton.style.transform = 'scale(1)';
+            }
+            
+            showSuccess('تم إعادة المناقصة لقائمة الاختيار بنجاح', 'يمكنك الآن اختيارها مرة أخرى');
+            console.log('✅ [TRACKING] Card returned to selection list successfully');
+            
+          } catch (error) {
+            console.error('❌ [TRACKING] Error returning card to list:', error);
+            showError('فشل في إعادة المناقصة للقائمة', 'خطأ');
+          }
+        },
+        'إعادة للقائمة'
+      );
+      
     } catch (error) {
-      console.error('❌ [TRACKING] Error clearing pending data:', error);
-      // Navigate anyway even if clearing fails
-      navigate('/tenders/add');
+      console.error('❌ [TRACKING] Error in handleReturnToList:', error);
+      showError('حدث خطأ أثناء معالجة البيانات', 'خطأ');
     }
   };
 
   // Optimized move card handler with stable updates - newest cards at top
-  const handleMoveCard = useCallback((updatedItem, sourceStage, targetStage) => {
-    setKanbanData(prevData => {
-      // Create deep copy for stability
-      const newData = {};
+  // 🚀 SENIOR FIREBASE: Enhanced move card handler with Firestore sync
+  const handleMoveCard = useCallback(async (updatedItem, sourceStage, targetStage) => {
+    try {
+      console.log('🔥 [TRACKING-PAGE] Moving card with Firebase sync:', {
+        id: updatedItem.id,
+        from: sourceStage,
+        to: targetStage
+      });
+
+      // Optimistic UI update for better UX
+      setKanbanData(prevData => {
+        const newData = {};
+        
+        Object.keys(prevData).forEach(stage => {
+          if (stage === sourceStage) {
+            newData[stage] = prevData[stage].filter(item => item.id !== updatedItem.id);
+          } else if (stage === targetStage) {
+            newData[stage] = [updatedItem, ...prevData[stage]];
+          } else {
+            newData[stage] = [...prevData[stage]];
+          }
+        });
+        
+        return newData;
+      });
+
+      // Sync with Firebase
+      await TenderTrackingService.moveTenderStage(
+        updatedItem.id, 
+        targetStage,
+        `تم نقل المناقصة من ${TenderTrackingService.getStageDisplayName(sourceStage)} إلى ${TenderTrackingService.getStageDisplayName(targetStage)}`
+      );
+
+      console.log('✅ [TRACKING-PAGE] Card moved and synced with Firebase');
       
-      // Copy all stages
-      Object.keys(prevData).forEach(stage => {
-        if (stage === sourceStage) {
-          // Remove from source stage
-          newData[stage] = prevData[stage].filter(item => item.id !== updatedItem.id);
-        } else if (stage === targetStage) {
-          // Add to target stage at the TOP (newest first)
-          newData[stage] = [updatedItem, ...prevData[stage]];
-        } else {
-          // Keep other stages unchanged
-          newData[stage] = [...prevData[stage]];
-        }
+    } catch (error) {
+      console.error('❌ [TRACKING-PAGE] Error moving card:', error);
+      
+      // Revert optimistic update on error
+      setKanbanData(prevData => {
+        const revertData = {};
+        
+        Object.keys(prevData).forEach(stage => {
+          if (stage === targetStage) {
+            revertData[stage] = prevData[stage].filter(item => item.id !== updatedItem.id);
+          } else if (stage === sourceStage) {
+            revertData[stage] = [updatedItem, ...prevData[stage]];
+          } else {
+            revertData[stage] = [...prevData[stage]];
+          }
+        });
+        
+        return revertData;
       });
       
-      console.log('📊 [STATE UPDATE] Card moved to top of target column successfully');
-      return newData;
-    });
-  }, []);
+      showError(error.message || 'فشل في تحديث حالة المناقصة', 'خطأ في التحديث');
+    }
+  }, [showError]);
 
   // Memoized container styles for performance
   const containerStyles = useMemo(() => ({
@@ -403,6 +806,25 @@ function TenderTrackingContent() {
     zIndex: 11,
     overflow: 'hidden'
   }), [sidebarCollapsed]);
+
+  // 🎯 SEARCH FILTERING: Filter kanban data based on search term
+  const filteredKanbanData = useMemo(() => {
+    if (!searchTerm) return kanbanData;
+    
+    const searchLower = searchTerm.toLowerCase();
+    const filteredData = {};
+    
+    Object.keys(kanbanData).forEach(stage => {
+      filteredData[stage] = kanbanData[stage].filter(tender => 
+        tender.title?.toLowerCase().includes(searchLower) ||
+        tender.entity?.toLowerCase().includes(searchLower) ||
+        tender.description?.toLowerCase().includes(searchLower) ||
+        tender.referenceNumber?.toLowerCase().includes(searchLower)
+      );
+    });
+    
+    return filteredData;
+  }, [kanbanData, searchTerm]);
 
   return (
     <div className={`page-wrapper ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`} dir="rtl">
@@ -429,7 +851,6 @@ function TenderTrackingContent() {
             </ol>
           </div>
           
-          <SidebarButtons />
           
           <div style={{
             height: 'calc(100vh - 200px)',
@@ -450,30 +871,84 @@ function TenderTrackingContent() {
                       <span className="text-muted">لوحة تتبع حالة المناقصات</span>
                     </div>
                     <div className="d-flex gap-2">
-                      <button 
-                        className="btn btn-outline-primary"
-                        style={{ 
-                          height: '32px', 
-                          fontSize: '14px',
-                          borderRadius: '6px',
-                          padding: '6px 12px'
-                        }}
-                      >
-                        <i className="bi bi-filter me-1"></i>
-                        تصفية
-                      </button>
+                      {/* 🎯 PIXEL CLONE: Search bar from tender selection page */}
+                      <div className="input-group raw-materials-search" style={{ maxWidth: '350px' }}>
+                        <input
+                          type="text"
+                          className="form-control shadow-sm border-1"
+                          placeholder="البحث في المناقصات..."
+                          value={searchTerm}
+                          onChange={(e) => setSearchTerm(e.target.value)}
+                          style={{ 
+                            borderRadius: '8px 0 0 8px',
+                            fontSize: '14px',
+                            height: '34px'
+                          }}
+                        />
+                        <span className="input-group-text bg-light border-1" style={{
+                          borderRadius: '0 8px 8px 0',
+                          borderLeft: '1px solid #dee2e6',
+                          height: '34px'
+                        }}>
+                          <i className="bi bi-search text-muted" style={{
+                            transform: 'scaleX(-1)'
+                          }}></i>
+                        </span>
+                      </div>
                       <button 
                         className="btn btn-primary"
                         onClick={handleAddTender}
                         style={{ 
-                          height: '32px', 
+                          height: '34px', 
                           fontSize: '14px',
                           borderRadius: '6px',
-                          padding: '6px 12px'
+                          padding: '6px 12px',
+                          whiteSpace: 'nowrap'
                         }}
                       >
-                        <i className="bi bi-plus-circle me-1"></i>
-                        إضافة مناقصة
+                        <i className="bi bi-list-check me-1"></i>
+                        اختيار مناقصة
+                      </button>
+                      <button 
+                        className="btn btn-outline-danger"
+                        id="return-to-list-zone"
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => handleReturnToList(e)}
+                        style={{ 
+                          height: '34px', 
+                          fontSize: '14px',
+                          borderRadius: '6px',
+                          padding: '6px 12px',
+                          whiteSpace: 'nowrap',
+                          marginLeft: '8px',
+                          border: '2px dashed #dc3545',
+                          backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                          transition: 'all 0.3s ease'
+                        }}
+                        onMouseOver={(e) => {
+                          e.currentTarget.style.backgroundColor = 'rgba(220, 53, 69, 0.2)';
+                          e.currentTarget.style.borderColor = '#c82333';
+                          e.currentTarget.style.transform = 'translateY(-1px)';
+                        }}
+                        onMouseOut={(e) => {
+                          e.currentTarget.style.backgroundColor = 'rgba(220, 53, 69, 0.1)';
+                          e.currentTarget.style.borderColor = '#dc3545';
+                          e.currentTarget.style.transform = 'translateY(0)';
+                        }}
+                        onDragEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = 'rgba(220, 53, 69, 0.3)';
+                          e.currentTarget.style.borderColor = '#c82333';
+                          e.currentTarget.style.transform = 'scale(1.05)';
+                        }}
+                        onDragLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'rgba(220, 53, 69, 0.1)';
+                          e.currentTarget.style.borderColor = '#dc3545';
+                          e.currentTarget.style.transform = 'scale(1)';
+                        }}
+                        title="اسحب البطاقة هنا لإعادتها للقائمة"
+                      >
+                        <i className="bi bi-arrow-return-left me-1"></i>
+                        إعادة للقائمة
                       </button>
                     </div>
                   </div>
@@ -483,10 +958,22 @@ function TenderTrackingContent() {
               {/* Kanban Board */}
               <div className="card shadow-sm">
                 <div className="card-body p-0">
-                  <KanbanBoard 
-                    kanbanData={kanbanData}
-                    onMoveCard={handleMoveCard}
-                  />
+                  {loading && (
+                    <div className="d-flex justify-content-center align-items-center py-5">
+                      <div className="text-center">
+                        <ModernSpinner size="large" />
+                        <p className="mt-3 text-muted">جار تحميل المناقصات المتتبعة...</p>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {!loading && (
+                    <KanbanBoard 
+                      kanbanData={filteredKanbanData}
+                      onMoveCard={handleMoveCard}
+                      navigate={navigate}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -496,6 +983,20 @@ function TenderTrackingContent() {
         {!sidebarCollapsed && isTimelineVisible && <SimpleActivityTimeline rtl={true} />}
         {!sidebarCollapsed && isTimelineVisible && <ManualActivityCreator />}
       </div>
+
+      {/* 🚀 SENIOR FIREBASE: Custom Alert for notifications */}
+      <CustomAlert
+        show={alertConfig.show}
+        onClose={closeAlert}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        type={alertConfig.type}
+        onConfirm={alertConfig.onConfirm}
+        showConfirm={alertConfig.showConfirm}
+        showCancel={alertConfig.showCancel}
+        confirmText={alertConfig.confirmText}
+        cancelText={alertConfig.cancelText}
+      />
     </div>
   );
 }
