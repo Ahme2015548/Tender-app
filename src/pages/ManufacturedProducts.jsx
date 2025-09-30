@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
-import SidebarButtons from '../components/SidebarButtons';
-import SimpleActivityTimeline from '../components/SimpleActivityTimeline';
-import ManualActivityCreator from '../components/ManualActivityCreator';
+
+// 🚀 PERFORMANCE: Lazy load heavy components
+const SimpleActivityTimeline = lazy(() => import('../components/SimpleActivityTimeline'));
+const ManualActivityCreator = lazy(() => import('../components/ManualActivityCreator'));
 import { ManufacturedProductService } from '../services/ManufacturedProductService';
 import { UniqueValidationService } from '../services/uniqueValidationService';
 import { useActivity } from '../components/ActivityManager';
@@ -12,7 +13,8 @@ import { ActivityProvider, AutoActivityTracker } from '../components/ActivityMan
 import ModernSpinner from '../components/ModernSpinner';
 import CustomAlert from '../components/CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
-import ItemSelectionModal from '../components/ItemSelectionModal';
+// 🚀 PERFORMANCE: Lazy load modal components
+const ItemSelectionModal = lazy(() => import('../components/ItemSelectionModal'));
 import { useActivityTimeline } from '../contexts/ActivityTimelineContext';
 import { FirestorePendingDataService } from '../services/FirestorePendingDataService';
 import { formatDateForInput } from '../utils/dateUtils';
@@ -23,6 +25,8 @@ import TenderDocumentModal from '../components/TenderDocumentModal';
 import { RawMaterialService } from '../services/rawMaterialService';
 import { ForeignProductService } from '../services/foreignProductService';
 import { LocalProductService } from '../services/localProductService';
+import { usePermission } from '../permissions/PermissionProvider';
+import { If } from '../permissions/If';
 
 function ManufacturedProductsContent() {
   const navigate = useNavigate();
@@ -31,8 +35,20 @@ function ManufacturedProductsContent() {
   const { alertConfig, closeAlert, showSuccess, showError, showConfirm } = useCustomAlert();
   const { isTimelineVisible } = useActivityTimeline();
   const { formatDate } = useDateFormat();
+  const { hasPerm, readOnly } = usePermission();
   
+  // Determine editing mode first
   const isEditing = !!id;
+  
+  // Determine if page should be read-only based on permissions
+  const canCreate = hasPerm('products:create');
+  const canUpdate = hasPerm('products:update');
+  const canDelete = hasPerm('products:delete');
+  const isReadOnlyMode = readOnly || (isEditing && !canUpdate) || (!isEditing && !canCreate);
+  
+  // Manufactured product items permissions - inherit from product permissions
+  const canEditItems = canUpdate;
+  const canDeleteItems = canDelete;
   
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [formData, setFormData] = useState({
@@ -55,9 +71,14 @@ function ManufacturedProductsContent() {
   const [customFileName, setCustomFileName] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [productItems, setProductItems] = useState([]);
-  
-  // ✅ ID-based duplicate prevention tracking
-  const [selectedItemIds, setSelectedItemIds] = useState([]);
+
+  // 🚀 Simple duplicate prevention with warning
+  const [duplicateWarning, setDuplicateWarning] = useState('');
+
+  // Helper function to clear warning after delay
+  const clearWarningAfterDelay = useCallback(() => {
+    setTimeout(() => setDuplicateWarning(''), 3000);
+  }, []);
 
   // 🧠 SENIOR REACT: Edit modal state management for product items
   const [showEditModal, setShowEditModal] = useState(false);
@@ -78,7 +99,7 @@ function ManufacturedProductsContent() {
         // 🔍 STEP 1: Check for pending items ONLY for NEW products
         if (!id) {
           console.log('📦 NEW PRODUCT: Loading pending product items...');
-          const pendingItems = await FirestorePendingDataService.getPendingProductItems();
+          const pendingItems = await FirestorePendingDataService.getPendingData('pendingProductItems_new'); // Product-specific key
           if (pendingItems && Array.isArray(pendingItems) && pendingItems.length > 0) {
             console.log('✅ NEW PRODUCT: Found', pendingItems.length, 'pending items - SETTING STATE IMMEDIATELY');
             console.log('📋 PENDING ITEMS DATA:', pendingItems.map(item => ({
@@ -89,11 +110,7 @@ function ManufacturedProductsContent() {
             setProductItems(pendingItems);
             
             // ✅ Load item IDs for duplicate prevention in new product mode
-            const newProductIds = pendingItems.map(item => 
-              item.internalId || item.materialInternalId || item.id
-            ).filter(id => id);
-            setSelectedItemIds(newProductIds);
-            console.log('✅ Loaded item IDs for new product mode:', newProductIds);
+            console.log('✅ Items loaded for new product mode:', pendingItems.length);
             
             console.log('🎯 NEW PRODUCT STATE SET: Items initialized with pending data');
           } else {
@@ -157,7 +174,7 @@ function ManufacturedProductsContent() {
           
           // 🔧 FIX: Load product items WITH pending items merge
           // Step 1: Get any new pending items from material pages
-          const pendingItems = await FirestorePendingDataService.getPendingProductItems();
+          const pendingItems = await FirestorePendingDataService.getPendingData(`pendingProductItems_${id}`); // Product-specific key
           
           // Step 2: Start with existing saved items
           let allProductItems = [];
@@ -189,7 +206,7 @@ function ManufacturedProductsContent() {
             }
             
             // Clear pending items now that we've processed them
-            await FirestorePendingDataService.clearPendingProductItems();
+            await FirestorePendingDataService.clearPendingData(`pendingProductItems_${id}`);
             console.log('🧹 EDIT MODE: Cleared pending items after merging');
           }
           
@@ -207,11 +224,7 @@ function ManufacturedProductsContent() {
             setProductItems(allProductItems);
             
             // Load all item IDs for duplicate prevention
-            const allIds = allProductItems.map(item => 
-              item.internalId || item.materialInternalId || item.id
-            ).filter(id => id);
-            setSelectedItemIds(allIds);
-            console.log('✅ Loaded all item IDs for edit mode:', allIds);
+            console.log('✅ Items loaded for edit mode:', allProductItems.length);
             
             // Update estimated value from all items
             const totalFromItems = allProductItems.reduce((total, item) => {
@@ -255,7 +268,7 @@ function ManufacturedProductsContent() {
           }
           
           // Check for pending items (from material selection pages)
-          const pendingItems = await FirestorePendingDataService.getPendingProductItems();
+          const pendingItems = await FirestorePendingDataService.getPendingData('pendingProductItems_new'); // Product-specific key
           
           if (pendingItems && pendingItems.length > 0) {
             console.log('🔄 NEW PRODUCT: Found pending items, adding to form');
@@ -424,7 +437,7 @@ function ManufacturedProductsContent() {
       loadPendingItemsRef.current = true;
       console.log('🔍 Loading pending product items from Firestore...');
       
-      const pendingItems = await FirestorePendingDataService.getPendingProductItems();
+      const pendingItems = await FirestorePendingDataService.getPendingData(`pendingProductItems_${id || 'new'}`); // Product-specific key
       if (pendingItems) {
         const parsedItems = Array.isArray(pendingItems) ? pendingItems : JSON.parse(pendingItems);
         console.log('📦 Found pending product items:', parsedItems.length, 'items');
@@ -433,53 +446,52 @@ function ManufacturedProductsContent() {
           name: item.materialName || item.name
         })));
         
-        // ✅ ID-based duplicate prevention using selectedItemIds
+        // 🚀 Simple name-based duplicate prevention
         setProductItems(prevItems => {
-          console.log('✅ PROCESSING NEW ITEMS WITH ID-BASED DUPLICATE PREVENTION');
+          console.log('🚀 PROCESSING NEW ITEMS WITH SIMPLE DUPLICATE PREVENTION');
           
-          // Filter out items that are already selected by ID
-          const newItems = parsedItems.filter(item => {
-            const itemId = item.internalId || item.materialInternalId || item.id;
-            const isDuplicate = itemId && selectedItemIds.includes(itemId);
+          const itemsToAdd = [];
+          const duplicateItems = [];
+          
+          // Check each new item for case-insensitive name duplicates
+          parsedItems.forEach(newItem => {
+            const newItemName = (newItem.materialName || newItem.name || '').trim();
             
-            if (isDuplicate) {
-              console.log('⚠️ DUPLICATE DETECTED (ID-based):', {
-                itemName: item.materialName || item.name,
-                itemId: itemId,
-                action: 'FILTERED_OUT'
-              });
+            if (!newItemName) {
+              console.log('⚠️ Empty item name, skipping');
+              return;
             }
             
-            return !isDuplicate;
+            const isDuplicate = prevItems.some(existingItem => {
+              const existingName = (existingItem.materialName || existingItem.name || '').trim();
+              return existingName.toLowerCase() === newItemName.toLowerCase();
+            });
+            
+            if (isDuplicate) {
+              duplicateItems.push(newItemName);
+              console.log('⚠️ DUPLICATE DETECTED (name-based):', newItemName);
+            } else {
+              itemsToAdd.push(newItem);
+            }
           });
           
-          console.log('✅ DUPLICATE PREVENTION RESULTS:', {
-            totalNewItems: parsedItems.length,
-            duplicatesFiltered: parsedItems.length - newItems.length,
-            itemsToAdd: newItems.length,
-            existingItems: prevItems.length
-          });
+          // Show warning if duplicates found
+          if (duplicateItems.length > 0) {
+            const warningMsg = duplicateItems.length === 1 
+              ? `⚠️ البند "${duplicateItems[0]}" موجود بالفعل`
+              : `⚠️ ${duplicateItems.length} بنود موجودة بالفعل`;
+            setDuplicateWarning(warningMsg);
+            clearWarningAfterDelay();
+          }
           
-          if (newItems.length === 0) {
+          if (itemsToAdd.length === 0) {
             console.log('📝 No new items to add after duplicate filtering');
             return prevItems;
           }
           
           // Add new items to existing items
-          const allItems = [...prevItems, ...newItems];
-          
-          // ✅ Update selectedItemIds with new item IDs
-          if (newItems.length > 0) {
-            const newItemIds = newItems.map(item => 
-              item.internalId || item.materialInternalId || item.id
-            ).filter(id => id);
-            
-            setSelectedItemIds(prev => {
-              const updatedIds = [...prev, ...newItemIds];
-              console.log('✅ Updated selectedItemIds:', updatedIds);
-              return updatedIds;
-            });
-          }
+          const allItems = [...prevItems, ...itemsToAdd];
+          console.log('✅ Added', itemsToAdd.length, 'new items, filtered', duplicateItems.length, 'duplicates')
           
           // Update estimated value from all items
           const totalFromItems = allItems.reduce((total, item) => {
@@ -590,7 +602,7 @@ function ManufacturedProductsContent() {
       
       if (productItems.length > 0 && !loadPendingItemsRef.current && !isRecentMount && !isDeletingOperation) {
         try {
-          await FirestorePendingDataService.setPendingProductItems(productItems);
+          await FirestorePendingDataService.setPendingData(`pendingProductItems_${id || 'new'}`, productItems, 48); // Product-specific key
           console.log('✅ SMART AUTO-SAVE: Saved product items to Firestore:', productItems.length, 'items');
           console.log('📋 AUTO-SAVE CONTENT:', productItems.map(item => ({
             id: item.internalId || item.materialInternalId,
@@ -611,8 +623,9 @@ function ManufacturedProductsContent() {
     };
     
     // 🛡️ CRITICAL FIX: Longer timeout to prevent race condition with loading
-    const timeoutId = setTimeout(autoSaveProductItems, 2000);
-    return () => clearTimeout(timeoutId);
+    // 🚀 PERFORMANCE: Debounced product items auto-save
+    const debouncedTimeout = setTimeout(autoSaveProductItems, 4000);
+    return () => clearTimeout(debouncedTimeout);
   }, [productItems]);
 
   // Auto-save documents to session storage
@@ -628,8 +641,9 @@ function ManufacturedProductsContent() {
       }
     };
     
-    const timeoutId = setTimeout(autoSaveDocuments, 1000);
-    return () => clearTimeout(timeoutId);
+    // 🚀 PERFORMANCE: Debounced documents auto-save
+    const debouncedTimeout = setTimeout(autoSaveDocuments, 2500);
+    return () => clearTimeout(debouncedTimeout);
   }, [documents, id]);
 
   // Listen for document restoration from trash
@@ -715,17 +729,28 @@ function ManufacturedProductsContent() {
     return total;
   }, [productItems]);
 
+  // 🚀 SENIOR REACT: Memoized VAT calculations for optimal performance
+  const vatAmount = useMemo(() => {
+    const subtotal = getTotalEstimatedValue();
+    return subtotal * 0.15; // 15% VAT
+  }, [getTotalEstimatedValue]);
+
+  const grandTotal = useMemo(() => {
+    const subtotal = getTotalEstimatedValue();
+    return subtotal + vatAmount;
+  }, [getTotalEstimatedValue, vatAmount]);
+
   // SENIOR REACT: Controlled estimated value updates - only when explicitly triggered
   const updateEstimatedValue = useCallback(() => {
     const currentTotal = productItems.reduce((sum, item) => {
       return sum + (item.totalPrice || 0);
     }, 0);
-    
+
     setFormData(prev => ({
       ...prev,
       estimatedValue: currentTotal.toString()
     }));
-    
+
     console.log('💰 CONTROLLED: Updated estimated value explicitly:', currentTotal);
     return currentTotal;
   }, [productItems]);
@@ -743,8 +768,9 @@ function ManufacturedProductsContent() {
       }
     };
     
-    const timeoutId = setTimeout(autoSaveFormData, 1000);
-    return () => clearTimeout(timeoutId);
+    // 🚀 PERFORMANCE: Debounced auto-save (reduced frequency)
+    const debouncedTimeout = setTimeout(autoSaveFormData, 3000);
+    return () => clearTimeout(debouncedTimeout);
   }, [formData, id]);
 
   const handleToggle = () => {
@@ -782,34 +808,9 @@ function ManufacturedProductsContent() {
     
     // Required fields validation
     if (!formData.title?.trim()) {
-      newErrors.title = 'اسم المنتج مطلوب';
+      newErrors.title = 'اسم البند مطلوب';
     }
     
-    if (!formData.referenceNumber?.trim()) {
-      newErrors.referenceNumber = 'رقم المرجع مطلوب';
-    }
-    
-    if (!formData.submissionDeadline) {
-      newErrors.submissionDeadline = 'تاريخ الإضافة مطلوب';
-    }
-    
-    // Unique validation for reference number
-    if (formData.referenceNumber?.trim()) {
-      try {
-        const isDuplicate = await UniqueValidationService.checkUnique(
-          'manufacturedProducts',
-          'referenceNumber', 
-          formData.referenceNumber.trim(),
-          isEditing ? id : null
-        );
-        
-        if (isDuplicate) {
-          newErrors.referenceNumber = 'رقم المرجع موجود مسبقاً';
-        }
-      } catch (error) {
-        console.warn('Could not validate reference number uniqueness:', error);
-      }
-    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -828,22 +829,25 @@ function ManufacturedProductsContent() {
     setErrors({});
 
     try {
-      // SENIOR REACT: Calculate and store estimated value in database
-      const calculatedTotal = productItems.reduce((sum, item) => {
+      // SENIOR REACT: Calculate subtotal and add VAT for final database value
+      const subtotal = productItems.reduce((sum, item) => {
         return sum + (item.totalPrice || 0);
       }, 0);
+      
+      const vatAmount = subtotal * 0.15; // 15% VAT
+      const grandTotal = subtotal + vatAmount;
 
       const productData = { 
         ...formData,
         submissionDeadline: formData.submissionDeadline ? new Date(formData.submissionDeadline) : null,
-        estimatedValue: calculatedTotal, // Store calculated total in database
+        estimatedValue: grandTotal, // Store grand total (subtotal + VAT) in database
         documents: documents, // Documents saved to Firebase
         items: productItems || [] // Product items saved to Firebase 
       };
       
-      console.log('💾 Saving complete product data to Firebase with calculated total:', {
+      console.log('💾 Saving complete product data to Firebase with grand total (includes VAT):', {
         title: productData.title,
-        estimatedValue: calculatedTotal,
+        estimatedValue: grandTotal,
         documentsCount: (productData.documents || []).length,
         itemsCount: (productData.items || []).length
       });
@@ -853,24 +857,24 @@ function ManufacturedProductsContent() {
         result = await ManufacturedProductService.updateManufacturedProduct(id, productData);
         
         const currentUser = getCurrentUser();
-        await logActivity('task', `${currentUser.name} عدل منتج مصنع`, `تم تعديل المنتج: ${productData.title}`);
+        await logActivity('task', `${currentUser.name} عدل بنود المناقصات`, `تم تعديل المنتج: ${productData.title}`);
         
         // Clear pending data after successful update
         await FirestorePendingDataService.clearPendingData(`productFormData_${id}`);
         await FirestorePendingDataService.clearPendingData(`productDocuments_${id}`);
-        await FirestorePendingDataService.clearPendingProductItems();
+        await FirestorePendingDataService.clearPendingData(`pendingProductItems_${id}`); // Product-specific key
         
         showSuccess('تم تحديث المنتج المصنع بنجاح', 'تم التحديث');
       } else {
         result = await ManufacturedProductService.createManufacturedProduct(productData);
         
         const currentUser = getCurrentUser();
-        await logActivity('task', `${currentUser.name} أضاف منتج مصنع`, `تم إضافة المنتج: ${productData.title}`);
+        await logActivity('task', `${currentUser.name} أضاف بنود المناقصات`, `تم إضافة المنتج: ${productData.title}`);
         
         // Clear pending data after successful creation
         await FirestorePendingDataService.clearPendingData('productFormData_new');
         await FirestorePendingDataService.clearPendingData('productDocuments_new');
-        await FirestorePendingDataService.clearPendingProductItems();
+        await FirestorePendingDataService.clearPendingData('pendingProductItems_new'); // Product-specific key
         
         // Clear success message flag for next product
         await FirestorePendingDataService.clearPendingData('product_success_shown_new');
@@ -897,7 +901,7 @@ function ManufacturedProductsContent() {
         console.log('🧹 CANCEL: Clearing all pending data for cancelled new product');
         await FirestorePendingDataService.clearPendingData('productFormData_new');
         await FirestorePendingDataService.clearPendingData('productDocuments_new'); 
-        await FirestorePendingDataService.clearPendingProductItems();
+        await FirestorePendingDataService.clearPendingData('pendingProductItems_new'); // Product-specific key
         
         // Clear success message flag for next product
         await FirestorePendingDataService.clearPendingData('product_success_shown_new');
@@ -940,6 +944,16 @@ function ManufacturedProductsContent() {
           const foreignProductsPath = `/manufactured-products/foreign-products/${id || 'new'}`;
           console.log('Navigating to foreign products:', foreignProductsPath);
           navigate(foreignProductsPath);
+          break;
+        case 'services':
+          const servicesPath = `/services/manufacture/${id || 'new'}`;
+          console.log('Navigating to service manufacture:', servicesPath);
+          navigate(servicesPath);
+          break;
+        case 'manufactured-product':
+          const manufacturedProductsPath = `/manufactured-products`;
+          console.log('Navigating to manufactured products list:', manufacturedProductsPath);
+          navigate(manufacturedProductsPath);
           break;
         default:
           console.log('Unknown item type:', itemType);
@@ -990,12 +1004,6 @@ function ManufacturedProductsContent() {
       // Remove from current list
       setProductItems(prevItems => {
         const newItems = prevItems.filter((_, idx) => idx !== index);
-        
-        // Remove item ID from selectedItemIds for duplicate prevention
-        const itemId = item?.internalId || item?.materialInternalId || item?.id;
-        if (itemId) {
-          setSelectedItemIds(prev => prev.filter(id => id !== itemId));
-        }
         
         // Recalculate estimated value
         const currentTotal = newItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
@@ -1145,7 +1153,7 @@ function ManufacturedProductsContent() {
         uploadedAt: new Date().toISOString(), // Use uploadedAt like TenderDocumentModal expects
         uploadDate: new Date().toISOString(), // Keep uploadDate for compatibility
         productId: id || 'new',
-        productTitle: formData.title || 'منتج مصنع جديد',
+        productTitle: formData.title || 'بنود المناقصات جديد',
         productReferenceNumber: formData.referenceNumber || 'غير محدد'
       };
       
@@ -1261,7 +1269,7 @@ function ManufacturedProductsContent() {
         console.log('⚠️ Document product mismatch - updating product context');
         // Update product context for proper restoration
         trashedDocument.productId = targetProductId;
-        trashedDocument.productTitle = formData.title || 'منتج مصنع جديد';
+        trashedDocument.productTitle = formData.title || 'بنود المناقصات جديد';
         trashedDocument.productReferenceNumber = formData.referenceNumber || 'غير محدد';
       }
 
@@ -1276,7 +1284,7 @@ function ManufacturedProductsContent() {
         fileType: trashedDocument.fileType,
         uploadDate: trashedDocument.uploadDate,
         productId: targetProductId,
-        productTitle: formData.title || 'منتج مصنع جديد',
+        productTitle: formData.title || 'بنود المناقصات جديد',
         productReferenceNumber: formData.referenceNumber || 'غير محدد'
       };
 
@@ -1346,16 +1354,15 @@ function ManufacturedProductsContent() {
                 </li>
                 <li className="breadcrumb-item">
                   <a href="/manufactured-products" className="text-decoration-none text-primary">
-                    المنتجات المصنعة
+                    بنود المناقصات
                   </a>
                 </li>
                 <li className="breadcrumb-item text-secondary" aria-current="page">
-                  {isEditing ? 'تعديل منتج مصنع' : 'إضافة منتج مصنع جديد'}
+                  {isEditing ? 'تعديل بند' : 'إضافة بند جديد'}
                 </li>
               </ol>
             </div>
             
-            <SidebarButtons />
             
             
             <div style={{
@@ -1370,7 +1377,7 @@ function ManufacturedProductsContent() {
                       <div className="d-flex align-items-center">
                         <h5 className="mb-0 fw-bold">
                           <i className={`bi ${isEditing ? 'bi-pencil-square' : 'bi-plus-circle-fill'} text-primary me-2`}></i>
-                          {isEditing ? 'تعديل المنتج المصنع' : 'إضافة منتج مصنع جديد'}
+                          {isEditing ? 'تعديل بند' : 'إضافة بند جديد'}
                         </h5>
                       </div>
                       <div className="d-flex gap-2">
@@ -1434,66 +1441,23 @@ function ManufacturedProductsContent() {
 
 
                         <div className="row">
-                          <div className="col-md-8 mb-3">
-                            <label className="form-label">اسم المنتج *</label>
+                          <div className="col-md-12 mb-3">
+                            <label className="form-label">اسم البند *</label>
                             <input
                               type="text"
                               className={`form-control ${errors.title ? 'is-invalid' : ''}`}
                               name="title"
                               value={formData.title}
                               onChange={handleChange}
-                              placeholder="أدخل اسم المنتج المصنع"
+                              placeholder="أدخل اسم البند"
                               disabled={loading}
                             />
                             {errors.title && <div className="invalid-feedback">{errors.title}</div>}
                           </div>
 
-                          <div className="col-md-4 mb-3">
-                            <label className="form-label">رقم المرجع *</label>
-                            <input
-                              type="text"
-                              className={`form-control ${errors.referenceNumber ? 'is-invalid' : ''}`}
-                              name="referenceNumber"
-                              value={formData.referenceNumber}
-                              onChange={handleChange}
-                              placeholder="رقم المرجع"
-                              disabled={loading}
-                            />
-                            {errors.referenceNumber && <div className="invalid-feedback">{errors.referenceNumber}</div>}
-                          </div>
 
-                          <div className="col-md-6 mb-3">
-                            <label className="form-label">تاريخ الإضافة *</label>
-                            <div className="input-group">
-                              <input
-                                type="date"
-                                className={`form-control ${errors.submissionDeadline ? 'is-invalid' : ''}`}
-                                name="submissionDeadline"
-                                value={formData.submissionDeadline || ''}
-                                onChange={handleChange}
-                                disabled={loading}
-                                required
-                                style={{
-                                  backgroundImage: 'url("data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 16 16\' fill=\'%23212529\'%3e%3cpath d=\'M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v1h14V3a1 1 0 0 0-1-1H2zm13 3H1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5z\'/%3e%3c/svg%3e")',
-                                  backgroundRepeat: 'no-repeat',
-                                  backgroundPosition: 'left 12px center',
-                                  backgroundSize: '16px 16px',
-                                  paddingLeft: '40px'
-                                }}
-                              />
-                              <span className="input-group-text bg-light">
-                                <i className="bi bi-calendar-event text-primary"></i>
-                              </span>
-                            </div>
-                            {formData.submissionDeadline && (
-                              <small className="text-muted d-block mt-1">
-                                التاريخ المحدد: {formatDate(formData.submissionDeadline)}
-                              </small>
-                            )}
-                            {errors.submissionDeadline && <div className="invalid-feedback">{errors.submissionDeadline}</div>}
-                          </div>
 
-                          <div className="col-md-6 mb-3">
+                          <div className="col-md-12 mb-3">
                             <label className="form-label">
                               التكلفة التقديرية
                               <small className="text-muted ms-2">(محسوبة تلقائياً من البنود)</small>
@@ -1505,7 +1469,7 @@ function ManufacturedProductsContent() {
                                 name="estimatedValue"
                                 value={(() => {
                                   const storedValue = getTotalEstimatedValue();
-                                  return storedValue > 0 ? `${storedValue.toLocaleString('en-US')} ريال` : '0 ريال';
+                                  return storedValue > 0 ? `${storedValue.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ريال` : '0.0 ريال';
                                 })()}
                                 readOnly
                                 placeholder="سيتم حسابها من البنود المضافة"
@@ -1522,7 +1486,7 @@ function ManufacturedProductsContent() {
                           </div>
 
                           <div className="col-md-12 mb-3">
-                            <label className="form-label">وصف المنتج</label>
+                            <label className="form-label">وصف البند</label>
                             <textarea
                               className="form-control"
                               name="description"
@@ -1551,6 +1515,11 @@ function ManufacturedProductsContent() {
                               </div>
                               
                               <div className="card-body p-0">
+                                {duplicateWarning && (
+                                  <div className="alert alert-warning mx-3 mt-3" role="alert">
+                                    {duplicateWarning}
+                                  </div>
+                                )}
                                 <div className="table-responsive">
                                   <table className="table table-hover custom-striped mb-0">
                                     <thead className="table-light">
@@ -1597,15 +1566,24 @@ function ManufacturedProductsContent() {
                                                     onClick={async (e) => {
                                                       e.preventDefault();
                                                       e.stopPropagation();
-                                                      
+
+                                                      const materialType = item.materialType || 'rawMaterial';
+
+                                                      // 🚀 SENIOR REACT: Services open edit modal directly (same as edit button)
+                                                      if (materialType === 'service') {
+                                                        console.log('🔧 Service clicked - opening edit modal');
+                                                        handleEditItem(item, index);
+                                                        return;
+                                                      }
+
+                                                      // For other materials, navigate to edit page
                                                       try {
                                                         console.log('=== DETAILED DEBUGGING ===');
                                                         console.log('Full item object:', JSON.stringify(item, null, 2));
                                                         console.log('All item keys:', Object.keys(item));
-                                                        
+
                                                         const materialInternalId = item.materialInternalId;
-                                                        const materialType = item.materialType || 'rawMaterial';
-                                                        
+
                                                         console.log('Searching for:');
                                                         console.log('- materialInternalId:', materialInternalId);
                                                         console.log('- materialType:', materialType);
@@ -1674,7 +1652,7 @@ function ManufacturedProductsContent() {
                                                           console.log('Loading foreign product...');
                                                           // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all products
                                                           let product = await ForeignProductService.getForeignProductByInternalId(materialInternalId);
-                                                          
+
                                                           if (!product) {
                                                             // Try matching by Firebase document ID as fallback
                                                             try {
@@ -1683,7 +1661,7 @@ function ManufacturedProductsContent() {
                                                               console.log('Could not find product by Firebase ID, trying name fallback...');
                                                             }
                                                           }
-                                                          
+
                                                           if (!product) {
                                                             // Last resort: try matching by name (requires full scan)
                                                             console.log('Using name fallback - loading all foreign products...');
@@ -1691,7 +1669,7 @@ function ManufacturedProductsContent() {
                                                             const displayName = item.materialName || item.name;
                                                             product = allItems.find(p => p.name === displayName);
                                                           }
-                                                          
+
                                                           console.log('Found foreign product:', product ? 'YES' : 'NO');
                                                           if (product) {
                                                             console.log('Product details:', { id: product.id, internalId: product.internalId, name: product.name });
@@ -1699,7 +1677,7 @@ function ManufacturedProductsContent() {
                                                             navigate(`/foreign-products/edit/${firebaseId}`);
                                                           }
                                                         }
-                                                        
+
                                                         if (!firebaseId) {
                                                           console.error('=== SEARCH FAILED ===');
                                                           console.error('Could not find Firebase ID for:', materialInternalId);
@@ -1729,12 +1707,12 @@ function ManufacturedProductsContent() {
                                               <td className="text-center">
                                                 <div>
                                                   <span className="text-success fw-bold">
-                                                    {displayPrice.toLocaleString('en-US')} ر.س
+                                                    {displayPrice.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ر.س
                                                   </span>
                                                   {item.unitPrice && (
                                                     <div>
                                                       <small className="text-muted">
-                                                        {item.unitPrice.toLocaleString('en-US')} × {item.quantity}
+                                                        {item.unitPrice.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} × {item.quantity.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}
                                                       </small>
                                                     </div>
                                                   )}
@@ -1743,31 +1721,35 @@ function ManufacturedProductsContent() {
                                               <td className="text-center">
                                                 {/* SENIOR REACT: Button group with edit and delete */}
                                                 <div className="btn-group btn-group-sm" style={{ marginLeft: '20px' }}>
-                                                  <button
-                                                    className="btn btn-outline-primary"
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                      e.preventDefault();
-                                                      e.stopPropagation();
-                                                      handleEditItem(item, index);
-                                                    }}
-                                                    title="تعديل"
-                                                  >
-                                                    <i className="bi bi-pencil"></i>
-                                                  </button>
-                                                  <button
-                                                    className="btn btn-outline-danger"
-                                                    type="button"
-                                                    onClick={(e) => {
-                                                      e.preventDefault();
-                                                      e.stopPropagation();
-                                                      handleItemDeleteClick(item, index);
-                                                    }}
-                                                    title="حذف"
-                                                    disabled={deleting}
-                                                  >
-                                                    <i className="bi bi-trash"></i>
-                                                  </button>
+                                                  <If can="products:update" mode="disable">
+                                                    <button
+                                                      className="btn btn-outline-primary"
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        handleEditItem(item, index);
+                                                      }}
+                                                      title="تعديل"
+                                                    >
+                                                      <i className="bi bi-pencil"></i>
+                                                    </button>
+                                                  </If>
+                                                  <If can="products:delete" mode="disable">
+                                                    <button
+                                                      className="btn btn-outline-danger"
+                                                      type="button"
+                                                      onClick={(e) => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        handleItemDeleteClick(item, index);
+                                                      }}
+                                                      title="حذف"
+                                                      disabled={deleting}
+                                                    >
+                                                      <i className="bi bi-trash"></i>
+                                                    </button>
+                                                  </If>
                                                 </div>
                                               </td>
                                             </tr>
@@ -1784,7 +1766,21 @@ function ManufacturedProductsContent() {
                                         <tr>
                                           <th colSpan="4" className="text-end">إجمالي القيمة:</th>
                                           <th className="text-center text-primary fw-bold">
-                                            {getTotalEstimatedValue().toLocaleString('en-US')} ر.س
+                                            {getTotalEstimatedValue().toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ر.س
+                                          </th>
+                                          <th></th>
+                                        </tr>
+                                        <tr>
+                                          <th colSpan="4" className="text-end">ضريبة القيمة المضافة (%15):</th>
+                                          <th className="text-center text-success fw-bold">
+                                            {vatAmount.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ر.س
+                                          </th>
+                                          <th></th>
+                                        </tr>
+                                        <tr className="table-warning">
+                                          <th colSpan="4" className="text-end">المبلغ الإجمالي:</th>
+                                          <th className="text-center fw-bold" style={{ color: '#000000' }}>
+                                            {grandTotal.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ر.س
                                           </th>
                                           <th></th>
                                         </tr>
@@ -1884,7 +1880,7 @@ function ManufacturedProductsContent() {
 
         {/* Edit Quantity Modal - EXACT CLONE from AddTender */}
         {showEditModal && editingItem && (
-          <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1050 }}>
+          <div className="modal show d-block" tabIndex="-1" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.8)', zIndex: 99980 }}>
             <div className="modal-dialog modal-xl modal-dialog-centered">
               <div className="modal-content" style={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 30px rgba(0,0,0,0.3)' }}>
                 <div className="modal-header bg-primary text-white" style={{ borderRadius: '12px 12px 0 0' }}>
@@ -2097,7 +2093,7 @@ function ManufacturedProductsContent() {
         {/* File Name Input Modal */}
         {showFileNameModal && (
           <div className="modal show d-block" 
-               style={{ backgroundColor: 'rgba(0,0,0,0.7)', zIndex: 1060 }} 
+               style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 99970 }} 
                tabIndex="-1" 
                dir="rtl">
             <div className="modal-dialog modal-dialog-centered">
