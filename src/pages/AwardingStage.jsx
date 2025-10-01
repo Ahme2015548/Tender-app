@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import Header from '../components/Header';
 import { ActivityProvider, AutoActivityTracker } from '../components/ActivityManager';
@@ -13,6 +13,9 @@ import TenderDocumentModal from '../components/TenderDocumentModal';
 import { formatDateForInput } from '../utils/dateUtils';
 import { GlobalCitySelect } from '../components/GlobalSettingsComponents';
 import { beginFullscreenBypass } from '../fullscreen/fullscreenBypass';
+import { JournalEntryService } from '../services/journalEntryService';
+import { TenderService } from '../services/TenderService';
+import PdfIcon from '../components/PdfIcon';
 
 // 🎯 PIXEL-PERFECT CLONE: Exact replica of AddTender page in read-only mode
 const TenderDetailsTab = React.memo(({ tenderId }) => {
@@ -710,7 +713,7 @@ const PriceAnalysisTab = React.memo(({ tenderId }) => {
         }
       } else if (materialType === 'manufacturedProduct') {
         console.log('Loading manufactured product...');
-        const { ManufacturedProductService } = await import('../services/manufacturedProductService');
+        const { ManufacturedProductService } = await import('../services/ManufacturedProductService');
         // 🚀 PERFORMANCE FIX: Use direct lookup instead of scanning all products
         let product = await ManufacturedProductService.getManufacturedProductByInternalId(materialInternalId);
 
@@ -1681,6 +1684,38 @@ const CompetitorAnalysisTab = React.memo(({ tenderId }) => {
                   الأقل سعراً
                 </small>
               )}
+              {(() => {
+                // Calculate our ranking among all competitors
+                const allPricesWithNames = [
+                  { price: priceStats.ourPrice, name: "مصنع عنان السماء", competitorId: "our_company" },
+                  ...competitorPrices
+                    .filter((cp, index, self) =>
+                      self.findIndex(item => item.competitorId === cp.competitorId) === index
+                    )
+                    .map(cp => ({
+                      price: parseFloat(cp.price) || 0,
+                      name: cp.competitorName,
+                      competitorId: cp.competitorId
+                    }))
+                    .filter(item => item.price > 0 && item.name && item.name.trim())
+                ].filter(item => item.price > 0);
+
+                // Sort by price (ascending)
+                allPricesWithNames.sort((a, b) => a.price - b.price);
+
+                // Find our position
+                const ourPosition = allPricesWithNames.findIndex(item => item.competitorId === "our_company") + 1;
+                const totalCompetitors = allPricesWithNames.length;
+
+                if (ourPosition > 0 && totalCompetitors > 1) {
+                  return (
+                    <small className="d-block mt-2" style={{ fontSize: '14px' }}>
+                      المركز {ourPosition}
+                    </small>
+                  );
+                }
+                return null;
+              })()}
             </div>
           </div>
         </div>
@@ -1954,6 +1989,40 @@ const CompetitorAnalysisTab = React.memo(({ tenderId }) => {
                               }}
                             />
 
+                            {/* Average price horizontal line */}
+                            {(() => {
+                              const averageY = 80 + 280 - ((priceStats.averagePrice - yAxisMin) / (yAxisMax - yAxisMin || 1)) * 280;
+                              return (
+                                <g>
+                                  {/* Red horizontal line for average - constrained between data points */}
+                                  <line
+                                    x1={chartPoints[0].x}
+                                    y1={averageY}
+                                    x2={chartPoints[chartPoints.length - 1].x}
+                                    y2={averageY}
+                                    stroke="#DC3545"
+                                    strokeWidth="1"
+                                    strokeDasharray="3,3"
+                                    style={{
+                                      opacity: 0.7,
+                                      animation: 'fadeUp 2s ease-out 0.5s both'
+                                    }}
+                                  />
+                                  {/* Average label - positioned outside chart area */}
+                                  <text
+                                    x="1105"
+                                    y={averageY + 4}
+                                    fontSize="11"
+                                    fontWeight="500"
+                                    fill="#DC3545"
+                                    fontFamily="system-ui, -apple-system, sans-serif"
+                                  >
+                                    متوسط الأسعار
+                                  </text>
+                                </g>
+                              );
+                            })()}
+
                             {/* Data points */}
                             {chartPoints.map((point, index) => {
                               const allPrices = chartPoints.map(p => p.bid.price);
@@ -1984,8 +2053,8 @@ const CompetitorAnalysisTab = React.memo(({ tenderId }) => {
                                     cx={point.x}
                                     cy={point.y}
                                     r={isLowestPrice ? "7" : "5"}
-                                    fill={point.bid.isOurs ? "#FFD700" : (isLowestPrice ? "#FFD700" : "#FFFFFF")}
-                                    stroke={point.bid.isOurs ? "#FFA000" : (isLowestPrice ? "#FFA000" : "#29B6F6")}
+                                    fill={point.bid.isOurs ? "#28A745" : (isLowestPrice ? "#FFD700" : "#FFFFFF")}
+                                    stroke={point.bid.isOurs ? "#1E7E34" : (isLowestPrice ? "#FFA000" : "#29B6F6")}
                                     strokeWidth="2"
                                     style={{
                                       filter: isLowestPrice
@@ -2040,14 +2109,31 @@ const CompetitorAnalysisTab = React.memo(({ tenderId }) => {
                                     }}
                                   />
 
-                                  {/* X-axis labels */}
+                                  {/* Thin gray line from our point - shortened */}
+                                  {point.bid.isOurs && (
+                                    <line
+                                      x1={point.x}
+                                      y1={point.y + 5}
+                                      x2={point.x}
+                                      y2={365}
+                                      stroke="#999999"
+                                      strokeWidth="1.5"
+                                      strokeDasharray="3,2"
+                                      style={{
+                                        animation: `fadeUp 2s ease-out ${index * 0.1}s both`,
+                                        opacity: 0.9
+                                      }}
+                                    />
+                                  )}
+
+                                  {/* X-axis labels - All company names */}
                                   <text
                                     x={point.x}
                                     y={385}
                                     textAnchor="middle"
                                     fontSize="12"
-                                    fontWeight="400"
-                                    fill="#666666"
+                                    fontWeight={point.bid.isOurs ? "600" : "400"}
+                                    fill={point.bid.isOurs ? "#495057" : "#666666"}
                                     fontFamily="system-ui, -apple-system, sans-serif"
                                     style={{ animation: `fadeUp 2s ease-out ${index * 0.1}s both` }}
                                   >
@@ -2076,8 +2162,8 @@ const CompetitorAnalysisTab = React.memo(({ tenderId }) => {
                           width: '10px',
                           height: '10px',
                           borderRadius: '50%',
-                          background: '#FFD700',
-                          border: '2px solid #FFA000'
+                          background: '#28A745',
+                          border: '2px solid #1E7E34'
                         }}></div>
                         <small style={{ color: '#666666', fontWeight: 'bold' }}>شركتنا</small>
                       </div>
@@ -2622,7 +2708,7 @@ const CompetitorAnalysisTab = React.memo(({ tenderId }) => {
                         <p className="mb-1"><strong>الاسم:</strong> {competitor.competitorName}</p>
                       </div>
                       <div className="mb-0">
-                        <label className="form-label fw-bold">السعر المقترح</label>
+                        <label className="form-label fw-bold">السعر</label>
                         <div className="input-group">
                           <input
                             type="number"
@@ -2669,27 +2755,485 @@ const CompetitorAnalysisTab = React.memo(({ tenderId }) => {
   );
 });
 
+// 🎯 NEW TAB: Actual Costs - Only visible when coming from WonProjectsList
+const ActualCostsTab = React.memo(({ tenderId }) => {
+  const [loading, setLoading] = useState(true);
+  const [projectEntity, setProjectEntity] = useState('');
+  const [journalEntries, setJournalEntries] = useState([]);
+  const [showDocumentsModal, setShowDocumentsModal] = useState(false);
+  const [currentDocuments, setCurrentDocuments] = useState([]);
+  const [tenderData, setTenderData] = useState(null); // 🎯 PIXEL-PERFECT: For tender summary
+
+  // 🎯 SENIOR REACT: Calculate actual values from journal entries
+  const [subtotalCost, setSubtotalCost] = useState(0); // Sum from journal entries (before VAT)
+  const [actualProfit, setActualProfit] = useState(0);
+  const [actualFinalPrice, setActualFinalPrice] = useState(0);
+  const [actualProfitMargin, setActualProfitMargin] = useState(0);
+
+  // 💰 SENIOR REACT: Calculate VAT and Grand Total (pixel-perfect clone from AddTender)
+  const vatAmount = useMemo(() => {
+    return subtotalCost * 0.15; // 15% VAT
+  }, [subtotalCost]);
+
+  const actualCost = useMemo(() => {
+    return subtotalCost + vatAmount; // التكلفة الفعلية = Grand Total (with VAT)
+  }, [subtotalCost, vatAmount]);
+
+  // 🚀 SENIOR REACT: Load journal entries function (separated for reusability)
+  const loadJournalEntries = useCallback(async (entity) => {
+    try {
+      console.log('🔄 [LIVE-SYNC] Loading journal entries for entity:', entity);
+
+      // Fetch all journal entries
+      const allJournals = await JournalEntryService.getAllJournalEntries();
+      console.log('📋 [LIVE-SYNC] Total journals loaded:', allJournals.length);
+
+      // Filter journal entries where costCenter matches entity name (only مدين)
+      const projectEntries = [];
+      allJournals.forEach(journal => {
+        if (journal.lines && Array.isArray(journal.lines)) {
+          journal.lines.forEach(line => {
+            // Only include debit entries (مدين) with matching cost center
+            if (line.costCenter === entity && line.debit > 0) {
+              projectEntries.push({
+                journalId: journal.id,
+                journalRef: journal.referenceNumber,
+                journalDate: journal.date,
+                lineId: line.lineId || line.id,
+                operations: line.operations || '',
+                amount: line.debit,
+                documents: line.documents || [],
+                accountName: line.accountName || ''
+              });
+            }
+          });
+        }
+      });
+
+      setJournalEntries(projectEntries);
+      console.log('✅ [LIVE-SYNC] Filtered project journal entries (مدين only):', projectEntries.length);
+
+      // Calculate subtotal cost from debit entries (before VAT)
+      const totalCost = projectEntries.reduce((sum, entry) => sum + (entry.amount || 0), 0);
+      setSubtotalCost(totalCost);
+      console.log('💰 [LIVE-SYNC] Calculated subtotal cost (before VAT):', totalCost);
+    } catch (error) {
+      console.error('❌ [LIVE-SYNC] Error loading journal entries:', error);
+    }
+  }, []);
+
+  // 🚀 SENIOR REACT: Initial load - Fetch project data and journal entries
+  useEffect(() => {
+    const loadProjectData = async () => {
+      if (!tenderId) return;
+
+      try {
+        setLoading(true);
+
+        // 1. Get project details to fetch entity name
+        const project = await TenderService.getTenderById(tenderId);
+        if (project) {
+          const entity = project.entity || '';
+          setProjectEntity(entity);
+          setTenderData(project); // 🎯 PIXEL-PERFECT: Store tender data for summary
+          console.log('✅ [INITIAL] Project entity:', entity);
+
+          // 2. Get السعر النهائي from TenderStudy
+          const studyResult = await TenderStudyService.getTenderStudy(tenderId);
+          if (studyResult.success && studyResult.data?.profitCalculation?.finalPrice) {
+            const finalPrice = parseFloat(studyResult.data.profitCalculation.finalPrice || 0);
+            setActualFinalPrice(finalPrice);
+            console.log('✅ [INITIAL] Loaded السعر النهائي:', finalPrice);
+          }
+
+          // 3. Load initial journal entries
+          await loadJournalEntries(entity);
+        }
+      } catch (error) {
+        console.error('❌ [INITIAL] Error loading project data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadProjectData();
+  }, [tenderId, loadJournalEntries]);
+
+  // 🔥 LIVE-SYNC: Poll for journal entry changes every 5 seconds
+  useEffect(() => {
+    if (!projectEntity) return;
+
+    console.log('🔥 [LIVE-SYNC] Starting live sync for entity:', projectEntity);
+
+    // Initial load
+    loadJournalEntries(projectEntity);
+
+    // Set up polling interval
+    const syncInterval = setInterval(() => {
+      console.log('🔄 [LIVE-SYNC] Polling for journal entry updates...');
+      loadJournalEntries(projectEntity);
+    }, 5000); // Poll every 5 seconds
+
+    // Cleanup interval on unmount
+    return () => {
+      console.log('🛑 [LIVE-SYNC] Stopping live sync');
+      clearInterval(syncInterval);
+    };
+  }, [projectEntity, loadJournalEntries]);
+
+  // 🔥 LIVE-SYNC: Listen for custom events from journal entry pages
+  useEffect(() => {
+    const handleJournalUpdate = (event) => {
+      console.log('🔔 [LIVE-SYNC] Journal entry updated event received');
+      if (projectEntity) {
+        loadJournalEntries(projectEntity);
+      }
+    };
+
+    window.addEventListener('journalEntryUpdated', handleJournalUpdate);
+    window.addEventListener('journalEntrySaved', handleJournalUpdate);
+    window.addEventListener('journalEntryDeleted', handleJournalUpdate);
+
+    return () => {
+      window.removeEventListener('journalEntryUpdated', handleJournalUpdate);
+      window.removeEventListener('journalEntrySaved', handleJournalUpdate);
+      window.removeEventListener('journalEntryDeleted', handleJournalUpdate);
+    };
+  }, [projectEntity, loadJournalEntries]);
+
+  // 🚀 SENIOR REACT: Calculate الربح الفعلي = سعر البيع - التكلفة الفعلية
+  useEffect(() => {
+    const calculatedProfit = actualFinalPrice - actualCost;
+    setActualProfit(calculatedProfit);
+
+    // Calculate profit margin percentage: هامش الربح الفعلي = (الربح الفعلي / سعر البيع) * 100
+    if (actualFinalPrice > 0) {
+      const margin = (calculatedProfit / actualFinalPrice) * 100;
+      setActualProfitMargin(margin);
+    } else {
+      setActualProfitMargin(0);
+    }
+  }, [actualFinalPrice, actualCost]);
+
+  // Handle opening documents modal
+  const handleOpenDocuments = (documents) => {
+    setCurrentDocuments(documents);
+    setShowDocumentsModal(true);
+  };
+
+  if (loading) {
+    return (
+      <div className="d-flex justify-content-center align-items-center" style={{ height: '200px' }}>
+        <ModernSpinner size="large" />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <TenderDocumentModal
+        show={showDocumentsModal}
+        onClose={() => {
+          setShowDocumentsModal(false);
+          setCurrentDocuments([]);
+        }}
+        documents={currentDocuments}
+        setDocuments={setCurrentDocuments}
+        tenderId={tenderId}
+        uploadingDocument={false}
+        setUploadingDocument={() => {}}
+        handleDocumentUpload={() => {}}
+        handleDeleteClick={() => {}}
+        deleting={false}
+        title="مستندات قيد التكلفة"
+        readOnly={true}
+      />
+
+    <div className="card shadow-sm">
+      <div className="card-header bg-white border-bottom py-4">
+        <div className="d-flex justify-content-between align-items-center">
+          <div className="d-flex align-items-center">
+            <h5 className="mb-0 fw-bold">
+              <i className="bi bi-cash-coin text-success me-2"></i>
+              التكاليف الفعلية
+            </h5>
+          </div>
+        </div>
+      </div>
+      <div className="card-body">
+        {/* 🎯 PIXEL-PERFECT CLONE: Tender summary from TenderStudy page */}
+        <div className="card shadow-sm mb-4">
+          <div className="card-header bg-light">
+            <h5 className="mb-0 text-primary">
+              <i className="bi bi-clipboard-data me-2"></i>
+              ملخص المناقصة
+            </h5>
+          </div>
+          <div className="card-body">
+            <div className="row">
+              <div className="col-md-4">
+                <p><strong>رقم المناقصة:</strong> {tenderData?.referenceNumber || tenderId}</p>
+                <p><strong>العنوان:</strong> {tenderData?.title || 'غير محدد'}</p>
+                <p><strong>الحالة:</strong> <span className="badge bg-success">فائزة</span></p>
+              </div>
+              <div className="col-md-4">
+                {tenderData && (
+                  <>
+                    <p><strong>الجهة:</strong> {tenderData.entity || 'غير محدد'}</p>
+                    <p><strong>آخر موعد للتقديم:</strong> {tenderData.submissionDeadline ? (() => {
+                      try {
+                        // Handle different date formats
+                        let date;
+                        if (tenderData.submissionDeadline.seconds) {
+                          // Firestore Timestamp
+                          date = new Date(tenderData.submissionDeadline.seconds * 1000);
+                        } else if (tenderData.submissionDeadline.toDate) {
+                          // Firestore Timestamp with toDate method
+                          date = tenderData.submissionDeadline.toDate();
+                        } else {
+                          // Regular date string or ISO string
+                          date = new Date(tenderData.submissionDeadline);
+                        }
+
+                        // Validate date
+                        if (isNaN(date.getTime())) {
+                          return 'غير محدد';
+                        }
+
+                        const day = String(date.getDate()).padStart(2, '0');
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const year = date.getFullYear();
+                        return day + '/' + month + '/' + year;
+                      } catch (error) {
+                        console.error('❌ Date parsing error:', error);
+                        return 'غير محدد';
+                      }
+                    })() : 'غير محدد'}</p>
+                    <p><strong>التكلفة التقديرية:</strong> {tenderData.estimatedValue ? parseFloat(tenderData.estimatedValue).toLocaleString() + ' ر.س' : 'غير محدد'}</p>
+                  </>
+                )}
+              </div>
+              <div className="col-md-4">
+                {/* Empty column for alignment - matching TenderStudy layout */}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 🎯 PIXEL-PERFECT CLONE: Exact 4-card structure from TenderStudy */}
+        <div className="row g-4 justify-content-center" style={{ marginTop: '15px' }}>
+          {/* Card 1: Actual Cost */}
+          <div className="col-lg-3 col-md-6">
+            <div className="p-3 bg-white rounded-3 shadow-sm h-100 border border-primary border-opacity-25">
+              <div className="text-center mb-2">
+                <i className="bi bi-currency-exchange text-primary" style={{ fontSize: '1.8rem' }}></i>
+              </div>
+              <div className="fw-bold text-dark mb-1 text-center" style={{ fontSize: '0.95rem' }}>التكلفة الفعلية</div>
+              <div className="text-primary fw-bold text-center" style={{ fontSize: '1.4rem' }}>
+                {actualCost.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ر.س
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Actual Profit */}
+          <div className="col-lg-3 col-md-6">
+            <div className="p-3 bg-white rounded-3 shadow-sm h-100 border border-success border-opacity-25">
+              <div className="text-center mb-2">
+                <i className="bi bi-plus-circle text-success" style={{ fontSize: '1.8rem' }}></i>
+              </div>
+              <div className="fw-bold text-dark mb-1 text-center" style={{ fontSize: '0.95rem' }}>الربح الفعلي</div>
+              <div className="text-success fw-bold text-center" style={{ fontSize: '1.4rem' }}>
+                {actualProfit.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ر.س
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3: Actual Final Price */}
+          <div className="col-lg-3 col-md-6">
+            <div className="p-3 bg-white rounded-3 shadow-sm h-100 border border-warning border-opacity-25">
+              <div className="text-center mb-2">
+                <i className="bi bi-cash-coin text-warning" style={{ fontSize: '1.8rem' }}></i>
+              </div>
+              <div className="fw-bold text-dark mb-1 text-center" style={{ fontSize: '0.95rem' }}>سعر البيع</div>
+              <div className="text-warning fw-bold text-center" style={{ fontSize: '1.4rem' }}>
+                {actualFinalPrice.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ر.س
+              </div>
+            </div>
+          </div>
+
+          {/* Card 4: Actual Profit Margin */}
+          <div className="col-lg-3 col-md-6">
+            <div className="p-3 bg-white rounded-3 shadow-sm h-100 border border-info border-opacity-25">
+              <div className="text-center mb-2">
+                <i className="bi bi-pie-chart text-info" style={{ fontSize: '1.8rem' }}></i>
+              </div>
+              <div className="fw-bold text-dark mb-1 text-center" style={{ fontSize: '0.95rem' }}>هامش الربح الفعلي</div>
+              <div className="text-info fw-bold text-center" style={{ fontSize: '1.4rem' }}>
+                {actualProfitMargin.toFixed(1)}%
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 🎯 SENIOR REACT: Journal Entries Table */}
+        <div className="mt-4">
+          <div className="card shadow-sm">
+            <div className="card-header bg-white border-bottom py-3">
+              <div className="d-flex justify-content-between align-items-center">
+                <h6 className="mb-0 fw-bold">
+                  <i className="bi bi-journal-text text-primary me-2"></i>
+                  التكلفة الفعلية
+                </h6>
+                <span className="badge bg-primary">
+                  {journalEntries.length} قيد
+                </span>
+              </div>
+            </div>
+            <div className="card-body p-0">
+              {journalEntries.length === 0 ? (
+                <div className="text-center py-5">
+                  <div className="text-muted mb-3">
+                    <i className="bi bi-journal-x fs-1"></i>
+                  </div>
+                  <h5 className="text-muted">لا توجد قيود يومية</h5>
+                  <p className="text-muted">لا توجد قيود يومية مرتبطة بهذا المشروع</p>
+                  <small className="text-muted">المشروع: {projectEntity || 'غير محدد'}</small>
+                </div>
+              ) : (
+                <div className="table-responsive">
+                  <table className="table table-hover custom-striped mb-0" style={{ tableLayout: 'fixed' }}>
+                    <thead className="table-light">
+                      <tr>
+                        <th style={{ width: '60px', textAlign: 'center', verticalAlign: 'middle' }}>#</th>
+                        <th style={{ width: '50%', textAlign: 'center', verticalAlign: 'middle' }}>البند</th>
+                        <th style={{ width: '100px', textAlign: 'center', verticalAlign: 'middle' }}>المرفقات</th>
+                        <th style={{ width: '20%', textAlign: 'center', verticalAlign: 'middle' }}>المبلغ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {journalEntries.map((entry, index) => (
+                        <tr key={`${entry.journalId}-${entry.lineId}`}>
+                          <td className="text-center" style={{ verticalAlign: 'middle' }}>
+                            <span className="fw-bold text-muted" style={{ fontSize: '14px' }}>
+                              {index + 1}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                            <span className="fw-bold text-primary">
+                              {entry.operations || 'غير محدد'}
+                            </span>
+                          </td>
+                          <td className="text-center" style={{ verticalAlign: 'middle' }}>
+                            {entry.documents && entry.documents.length > 0 ? (
+                              <div style={{ position: 'relative', display: 'inline-block' }}>
+                                <PdfIcon
+                                  size={25}
+                                  clickable={true}
+                                  onClick={() => handleOpenDocuments(entry.documents)}
+                                  title={`إدارة المستندات (${entry.documents.length})`}
+                                  style={{ cursor: 'pointer' }}
+                                />
+                                <span
+                                  className="badge bg-info"
+                                  style={{
+                                    fontSize: '8px',
+                                    position: 'absolute',
+                                    top: '-2px',
+                                    right: '16px',
+                                    minWidth: '14px',
+                                    height: '14px',
+                                    borderRadius: '50%',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                  }}
+                                >
+                                  {entry.documents.length}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-muted">-</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: 'center', verticalAlign: 'middle' }}>
+                            <span className="fw-bold" style={{ color: '#495057' }}>
+                              {entry.amount.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ر.س
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    {/* 🎯 PIXEL-PERFECT CLONE: Exact tfoot structure from AddTender */}
+                    <tfoot className="table-light">
+                      <tr>
+                        <th colSpan="3" className="text-end">إجمالي القيمة:</th>
+                        <th className="text-center text-primary fw-bold">
+                          {subtotalCost.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ر.س
+                        </th>
+                      </tr>
+                      <tr>
+                        <th colSpan="3" className="text-end">ضريبة القيمة المضافة (%15):</th>
+                        <th className="text-center text-success fw-bold">
+                          {vatAmount.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ر.س
+                        </th>
+                      </tr>
+                      <tr className="table-warning">
+                        <th colSpan="3" className="text-end">المبلغ الإجمالي:</th>
+                        <th className="text-center fw-bold" style={{ color: '#000000' }}>
+                          {actualCost.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ر.س
+                        </th>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </>
+  );
+});
+
 // 🎯 PIXEL-PERFECT MAIN COMPONENT: Exact structure from original pages
 function AwardingStageContent() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState('details');
   const { isTimelineVisible } = useActivityTimeline();
   const { alertConfig, closeAlert } = useCustomAlert();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
 
   const tenderId = useMemo(() => searchParams.get('tenderId'), [searchParams]);
+
+  // 🚀 SENIOR REACT: Check if coming from WonProjectsList
+  const fromWonProjects = useMemo(() => {
+    return location.state?.fromWonProjects === true;
+  }, [location.state]);
+
+  // 🚀 SENIOR REACT: Set default tab based on source - actualCosts when from WonProjects, otherwise details
+  const [activeTab, setActiveTab] = useState(fromWonProjects ? 'actualCosts' : 'details');
 
   const handleToggle = useCallback(() => {
     setSidebarCollapsed(prev => !prev);
   }, []);
 
-  // Tab configuration
-  const tabs = useMemo(() => [
-    { id: 'details', label: 'تفاصيل المناقصة', icon: 'bi-info-circle' },
-    { id: 'pricing', label: 'دراسة الأسعار', icon: 'bi-calculator' },
-    { id: 'competitors', label: 'دراسة المنافسين', icon: 'bi-people' }
-  ], []);
+  // Tab configuration - conditionally add ActualCosts tab
+  const tabs = useMemo(() => {
+    const baseTabs = [
+      { id: 'details', label: 'تفاصيل المناقصة', icon: 'bi-info-circle' },
+      { id: 'pricing', label: 'دراسة الأسعار', icon: 'bi-calculator' },
+      { id: 'competitors', label: 'دراسة المنافسين', icon: 'bi-people' }
+    ];
+
+    // 🚀 SENIOR REACT: Add ActualCosts tab only when coming from WonProjectsList
+    if (fromWonProjects) {
+      baseTabs.splice(1, 0, { id: 'actualCosts', label: 'التكاليف الفعلية', icon: 'bi-cash-coin' });
+    }
+
+    return baseTabs;
+  }, [fromWonProjects]);
 
   if (!tenderId) {
     return (
@@ -2787,6 +3331,7 @@ function AwardingStageContent() {
                 </div>
               }>
                 {activeTab === 'details' && <TenderDetailsTab tenderId={tenderId} />}
+                {activeTab === 'actualCosts' && <ActualCostsTab tenderId={tenderId} />}
                 {activeTab === 'pricing' && <PriceAnalysisTab tenderId={tenderId} />}
                 {activeTab === 'competitors' && <CompetitorAnalysisTab tenderId={tenderId} />}
               </Suspense>
