@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, updateDoc, serverTimestamp, increment } from 'firebase/firestore';
 import { auth, db } from '../services/firebase';
+import { EmployeeService } from '../services/employeeService';
 import CustomAlert from '../components/CustomAlert';
 import { useCustomAlert } from '../hooks/useCustomAlert';
 import ModernSpinner from '../components/ModernSpinner';
 import { userSettingsService } from '../services/UserSettingsService';
+import sessionService from '../services/SessionService';
 import '../assets/css/login.css';
 
-const LoginPage = ({ onSignIn }) => {
+const LoginPage = ({ onSignIn, onBackToWelcome }) => {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -134,6 +136,9 @@ const LoginPage = ({ onSignIn }) => {
       // Check if user has active employee record
       const employeeData = await checkEmployeeStatus(userCredential.user.uid);
 
+      // Initialize session monitoring after successful login
+      await sessionService.initializeSession(userCredential.user);
+
       // Handle remember me
       if (formData.rememberMe) {
         await userSettingsService.setSetting('rememberedEmail', formData.email.trim());
@@ -208,7 +213,15 @@ const LoginPage = ({ onSignIn }) => {
                   </div>
 
                   {/* Login Form */}
-                  <div className="login-form">
+                  <div className="login-form" style={{
+                    background: '#f8f9fa',
+                    borderRadius: '15px',
+                    padding: '40px 30px',
+                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
+                    border: '1px solid #e9ecef',
+                    maxWidth: '500px',
+                    margin: '0 auto'
+                  }}>
                     <div className="form-header text-center mb-4">
                       <h3 className="login-title">تسجيل الدخول</h3>
                       <p className="login-subtitle text-muted">أدخل بياناتك للوصول إلى النظام</p>
@@ -288,6 +301,7 @@ const LoginPage = ({ onSignIn }) => {
                         type="submit"
                         className="btn btn-login w-100"
                         disabled={loading}
+                        style={{ color: '#ffffff' }}
                       >
                         {loading ? (
                           <>
@@ -312,12 +326,55 @@ const LoginPage = ({ onSignIn }) => {
                         <div className="notice-content">
                           <h6 className="mb-1">نظام آمن ومحمي</h6>
                           <p className="mb-0 small text-muted">
-                            هذا النظام مخصص للموظفين المعتمدين فقط. 
+                            هذا النظام مخصص للموظفين المعتمدين فقط.
                             جميع الأنشطة مراقبة ومسجلة لضمان الأمان.
                           </p>
                         </div>
                       </div>
                     </div>
+
+                    {/* Back to Welcome Button - Inside Form */}
+                    {onBackToWelcome && (
+                      <div className="text-center mt-4">
+                        <button
+                          type="button"
+                          className="btn btn-lg"
+                          onClick={() => {
+                            console.log('🔙 Back button clicked');
+                            onBackToWelcome();
+                          }}
+                          style={{
+                            background: 'rgba(255, 255, 255, 0.95)',
+                            border: '2px solid #007bff',
+                            borderRadius: '12px',
+                            padding: '12px 40px',
+                            fontSize: '17px',
+                            fontWeight: '600',
+                            color: '#007bff',
+                            boxShadow: '0 4px 15px rgba(0, 123, 255, 0.2)',
+                            transition: 'all 0.3s ease',
+                            minWidth: '250px'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.target.style.background = 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)';
+                            e.target.style.color = '#ffffff';
+                            e.target.style.transform = 'translateY(-2px)';
+                            e.target.style.boxShadow = '0 6px 20px rgba(0, 123, 255, 0.4)';
+                            e.target.style.border = '2px solid #007bff';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.target.style.background = 'rgba(255, 255, 255, 0.95)';
+                            e.target.style.color = '#007bff';
+                            e.target.style.transform = 'translateY(0)';
+                            e.target.style.boxShadow = '0 4px 15px rgba(0, 123, 255, 0.2)';
+                            e.target.style.border = '2px solid #007bff';
+                          }}
+                        >
+                          <i className="bi bi-arrow-right me-2"></i>
+                          العودة للصفحة الرئيسية
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
