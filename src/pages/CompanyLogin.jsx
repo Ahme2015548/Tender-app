@@ -66,6 +66,10 @@ const CompanyLogin = ({ onCompanyLogin, onBackToWelcome }) => {
       localStorage.setItem('currentCompany', JSON.stringify(companyData));
       console.log('✅ Step 4: Company session stored');
 
+      // 4.5. Dispatch company changed event for services (like ActivityTimelineService)
+      window.dispatchEvent(new CustomEvent('companyChanged', { detail: { companyId: companyData.id } }));
+      console.log('✅ Step 4.5: Company changed event dispatched');
+
       // 5. Call parent callback - React will automatically re-render and show the app
       onCompanyLogin(companyData);
       console.log('✅ Step 5: Admin login complete - rendering app');
